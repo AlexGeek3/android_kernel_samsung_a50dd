@@ -101,6 +101,8 @@ SCHED_FEAT(ENERGY_AWARE, true)
 SCHED_FEAT(ENERGY_AWARE, false)
 #endif
 
+SCHED_FEAT(HISI_FILTER, true)
+
 /*
  * Energy aware scheduling algorithm choices:
  * EAS_PREFER_IDLE
