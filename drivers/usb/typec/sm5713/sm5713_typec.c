@@ -355,51 +355,6 @@ static void sm5713_corr_sbu_volt_read(void *_data, u8 *adc_sbu1,
 			__func__, mode, adc_value1, adc_value2);
 }
 
-static int sm5713_check_unsupported_accessory(void *_data)
-{
-	struct sm5713_phydrv_data *pdic_data = _data;
-	struct i2c_client *i2c = pdic_data->i2c;	
-	u8 adc_cc1, adc_cc2, adc_det;
-	int ret = 0;
-
-	sm5713_usbpd_write_reg(i2c, 0x9C, 0x2C); /* LPM toggle Stop */
-	/* DET = 100uA, CC = 5.1k ohm(Rd) */
-	sm5713_usbpd_write_reg(i2c, SM5713_REG_CORR_CNTL5, 0x42);
-	msleep(20);
-
-	sm5713_usbpd_write_reg(i2c, SM5713_REG_ADC_CTRL1,
-			SM5713_ADC_PATH_SEL_CC1);
-	sm5713_adc_value_read(pdic_data, &adc_cc1);
-
-	sm5713_usbpd_write_reg(i2c, SM5713_REG_ADC_CTRL1,
-			SM5713_ADC_PATH_SEL_CC2);
-	sm5713_adc_value_read(pdic_data, &adc_cc2);
-
-	sm5713_usbpd_write_reg(i2c, SM5713_REG_ADC_CTRL1,
-			SM5713_ADC_PATH_SEL_DET);
-	sm5713_adc_value_read(pdic_data, &adc_det);
-
-	if ((adc_cc1 < 0x2 || adc_cc2 < 0x2) &&
-			(((adc_cc1 > 0x6 && adc_cc1 < 0xA) ||
-			(adc_cc2 > 0x6 && adc_cc2 < 0xA))) &&
-			((adc_det > 0x16) && (adc_det < 0x1D))) {
-		pr_info("%s, ccstat : cc_AUDIO(Samsung Analog Earphone)\n", __func__);
-#if defined(CONFIG_SM5713_WATER_DETECTION_ENABLE)
-		/* Water Release Check Period = 120ms */
-		sm5713_usbpd_write_reg(i2c, 0x99, 0x00);
-		pdic_data->status_reg |= PLUG_ATTACH;
-#endif
-		ret = CCIC_DOCK_UNSUPPORTED_AUDIO;
-	}
-
-	pr_info("%s, CC1_VOLT : 0x%x, CC2_VOLT : 0x%x, DET_VOLT : 0x%x\n",
-			__func__, adc_cc1, adc_cc2, adc_det);
-
-	sm5713_usbpd_write_reg(i2c, SM5713_REG_CORR_CNTL5, 0x00);
-	sm5713_usbpd_write_reg(i2c, 0x9C, 0x28);
-	return ret;
-}
-
 #if defined(CONFIG_SM5713_WATER_DETECTION_ENABLE)
 static void sm5713_process_cc_water_det(void *data, int state)
 {
@@ -1807,9 +1762,6 @@ static bool sm5713_poll_status(void *_data, int irq)
 	u8 intr[5] = {0};
 	u8 status[5] = {0};
 	int ret = 0;
-#if defined(CONFIG_SM5713_WATER_DETECTION_ENABLE)
-	int is_unsupported_accessory = 0;
-#endif
 #if defined(CONFIG_USB_HW_PARAM)
 	struct otg_notify *o_notify = get_otg_notify();
 #endif
@@ -1843,19 +1795,7 @@ static bool sm5713_poll_status(void *_data, int irq)
 			pdic_data->is_sbu_abnormal_state = false;
 		if (pdic_data->is_cc_abnormal_state)
 			pdic_data->is_cc_abnormal_state = false;
-
-#if !defined(CONFIG_SM5713_WATER_DETECTION_ENABLE)
-		if (pdic_data->is_unsupported_accessory == CCIC_DOCK_UNSUPPORTED_AUDIO)
-			pdic_data->status_reg |= PLUG_DETACH;
-#endif
 	}
-
-#if !defined(CONFIG_SM5713_WATER_DETECTION_ENABLE)
-	if (intr[0] & SM5713_REG_INT_STATUS1_DET_DETECT) {
-		schedule_delayed_work(&pdic_data->unsupported_acc_work,
-				msecs_to_jiffies(300));
-	}
-#endif
 
 	if ((intr[4] & SM5713_REG_INT_STATUS5_CC_ABNORMAL_ST) &&
 			(status[4] & SM5713_REG_INT_STATUS5_CC_ABNORMAL_ST)) {
@@ -1879,13 +1819,8 @@ static bool sm5713_poll_status(void *_data, int irq)
 #if defined(CONFIG_SM5713_WATER_DETECTION_ENABLE)
 	if ((intr[2] & SM5713_REG_INT_STATUS3_WATER) &&
 			(status[2] & SM5713_REG_INT_STATUS3_WATER)) {
-			is_unsupported_accessory = sm5713_check_unsupported_accessory(pdic_data);
-		if (!is_unsupported_accessory) {
 			pdic_data->is_water_detect = true;
 			sm5713_process_cc_water_det(pdic_data, WATER_MODE_ON);
-		} else {
-			pdic_data->is_unsupported_accessory = is_unsupported_accessory;
-		}
 	}
 #endif
 	if ((intr[1] & SM5713_REG_INT_STATUS2_SRC_ADV_CHG) &&
@@ -1908,11 +1843,6 @@ static bool sm5713_poll_status(void *_data, int irq)
 
 #if defined(CONFIG_SM5713_WATER_DETECTION_ENABLE)
 	if (intr[2] & SM5713_REG_INT_STATUS3_WATER_RLS) {
-		if (pdic_data->is_unsupported_accessory == CCIC_DOCK_UNSUPPORTED_AUDIO) {
-			pdic_data->status_reg |= PLUG_DETACH;
-			sm5713_usbpd_write_reg(i2c, 0x99, 0x7D);
-		}
-
 		if ((intr[2] & SM5713_REG_INT_STATUS3_WATER) == 0 &&
 				pdic_data->is_water_detect) {
 			pdic_data->is_water_detect = false;
@@ -1942,9 +1872,6 @@ static bool sm5713_poll_status(void *_data, int irq)
 #endif
 			(status[0] & SM5713_REG_INT_STATUS1_ATTACH)) {
 		pdic_data->status_reg |= PLUG_ATTACH;
-#if !defined(CONFIG_SM5713_WATER_DETECTION_ENABLE)
-		cancel_delayed_work(&pdic_data->unsupported_acc_work);
-#endif
 		if (irq != (-1))
 			sm5713_usbpd_set_vbus_dischg_gpio(pdic_data, 0);
 	}
@@ -2686,8 +2613,7 @@ static int sm5713_usbpd_notify_attach(void *data)
 		msleep(180); /* don't over 310~620ms(tTypeCSinkWaitCap) */
 		/* cc_AUDIO */
 	} else if (((reg_data & SM5713_ATTACH_TYPE) == SM5713_ATTACH_AUDIO) ||
-			((reg_data & SM5713_ATTACH_TYPE) == SM5713_ATTACH_AUDIO_CHARGE) ||
-			pdic_data->is_unsupported_accessory == CCIC_DOCK_UNSUPPORTED_AUDIO) {
+			((reg_data & SM5713_ATTACH_TYPE) == SM5713_ATTACH_AUDIO_CHARGE)) {
 		dev_info(dev, "ccstat : cc_AUDIO\n");
 		manager->acc_type = CCIC_DOCK_UNSUPPORTED_AUDIO;
 		sm5713_usbpd_check_accessory(manager);
@@ -2745,7 +2671,6 @@ static void sm5713_usbpd_notify_detach(void *data)
 	pdic_data->is_sbu_abnormal_state = false;
 	pdic_data->is_jig_case_on = false;
 	pdic_data->reset_done = 0;
-	pdic_data->is_unsupported_accessory = 0;
 	pdic_data->pd_support = 0;
 	sm5713_usbpd_policy_reset(pd_data, PLUG_DETACHED);
 #if defined(CONFIG_TYPEC)
@@ -3167,30 +3092,6 @@ static void sm5713_delayed_external_notifier_init(struct work_struct *work)
 		pr_info("%s : external notifier register done!\n", __func__);
 }
 
-#if !defined(CONFIG_SM5713_WATER_DETECTION_ENABLE)
-static void sm5713_unsupported_acc_check(struct work_struct *work)
-{
-	struct sm5713_phydrv_data *pdic_data =
-		container_of(work, struct sm5713_phydrv_data,
-				unsupported_acc_work.work);
-	struct i2c_client *i2c = pdic_data->i2c;
-	u8 status1 = 0;
-	int is_unsupported_accessory = 0;
-
-	sm5713_usbpd_read_reg(i2c, SM5713_REG_STATUS1, &status1);
-
-	if (!(status1 & SM5713_REG_INT_STATUS1_ATTACH) &&
-			!(status1 & SM5713_REG_INT_STATUS1_VBUSPOK) &&
-			(status1 & SM5713_REG_INT_STATUS1_DET_DETECT)) {
-		is_unsupported_accessory = sm5713_check_unsupported_accessory(pdic_data);
-		if (is_unsupported_accessory == CCIC_DOCK_UNSUPPORTED_AUDIO) {
-			pdic_data->is_unsupported_accessory = is_unsupported_accessory;
-			sm5713_usbpd_notify_attach(pdic_data);
-		}
-	}
-}
-#endif
-
 static void sm5713_usbpd_debug_reg_log(struct work_struct *work)
 {
 	struct sm5713_phydrv_data *pdic_data =
@@ -3327,9 +3228,6 @@ static int sm5713_usbpd_probe(struct i2c_client *i2c,
 #endif
 #if defined(CONFIG_VBUS_NOTIFIER)
 	INIT_DELAYED_WORK(&pdic_data->vbus_noti_work, sm5713_usbpd_handle_vbus);
-#endif
-#if !defined(CONFIG_SM5713_WATER_DETECTION_ENABLE)
-	INIT_DELAYED_WORK(&pdic_data->unsupported_acc_work, sm5713_unsupported_acc_check);
 #endif
 	INIT_DELAYED_WORK(&pdic_data->rx_buf_work, sm5713_execute_rx_buffer);
 	INIT_DELAYED_WORK(&pdic_data->vbus_dischg_work,

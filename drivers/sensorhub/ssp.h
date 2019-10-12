@@ -200,6 +200,16 @@ struct calibraion_data {
 	s16 z;
 };
 
+struct magnetic_calibration_data {
+	u8 accuracy;
+	s16 offset_x;
+	s16 offset_y;
+	s16 offset_z;
+	s16 flucv_x;
+	s16 flucv_y;
+	s16 flucv_z;
+};
+
 struct sensor_info;
 
 struct ssp_data {
@@ -296,7 +306,7 @@ struct ssp_data {
 	unsigned char uFuseRomData[3];
 	unsigned char geomag_cntl_regdata;
 	bool is_geomag_raw_enabled;
-	struct calibraion_data magcal;
+	struct magnetic_calibration_data magcal;
 #endif
 #ifdef CONFIG_SENSORS_SSP_PROXIMITY
 	struct  proximity_sensor_operations *proximity_ops;
@@ -308,7 +318,6 @@ struct ssp_data {
 	u16 prox_thresh[PROX_THRESH_SIZE]; /* high, low*/
 #endif
 #if defined(CONFIG_SENSROS_SSP_PROXIMITY_THRESH_CAL)
-	struct delayed_work work_prox_cal_off;
 	bool is_prox_cal;
 #ifdef CONFIG_SENSORS_SSP_PROXIMITY_STK3X3X
 	u16 prox_thresh_addval[PROX_THRESH_SIZE+1];

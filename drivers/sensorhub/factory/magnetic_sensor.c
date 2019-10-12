@@ -81,7 +81,7 @@ static ssize_t magnetic_hw_offset_show(struct device *dev,
                                        struct device_attribute *attr, char *buf)
 {
 	struct ssp_data *data = dev_get_drvdata(dev);
-	return snprintf(buf, PAGE_SIZE, "%d,%d,%d\n", data->magcal.x, data->magcal.y, data->magcal.z);
+	return snprintf(buf, PAGE_SIZE, "%d,%d,%d\n", data->magcal.offset_x, data->magcal.offset_y, data->magcal.offset_z);
 }
 
 static ssize_t magnetic_matrix_show(struct device *dev,

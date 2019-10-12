@@ -649,8 +649,10 @@ int contexthub_ipc_write_event(struct contexthub_ipc_info *ipc,
 		break;
 	case MAILBOX_EVT_POWER_ON:
 		ret = contexthub_hw_reset(ipc, event);
+#if 0
 		if (!ret)
 			log_schedule_flush_all();
+#endif
 		break;
 	case MAILBOX_EVT_RESET:
 		if (atomic_read(&ipc->chub_status) == CHUB_ST_SHUTDOWN) {

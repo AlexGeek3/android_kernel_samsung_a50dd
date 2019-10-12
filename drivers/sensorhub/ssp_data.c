@@ -179,9 +179,9 @@ int parse_dataframe(struct ssp_data *data, char *dataframe, int frame_len)
 #ifdef CONFIG_SENSORS_SSP_MAGNETIC
 			case SSP2AP_MAG_CAL:
 			{
-				s16 caldata[3] = {0, };
+				u8 caldata[13] = {0,};
 
-				ssp_infof("Mag caldata received from MCU\n");
+				ssp_infof("Mag caldata received from MCU(%d)\n", sizeof(caldata));
 				memcpy(caldata, dataframe + index, sizeof(caldata));
 
 				wake_lock(&data->ssp_wake_lock);
@@ -201,7 +201,8 @@ int parse_dataframe(struct ssp_data *data, char *dataframe, int frame_len)
 				data->prox_thresh[1] = thresh[1];
 				index += sizeof(thresh);
 				ssp_infof("prox thresh received %u %u", data->prox_thresh[0], data->prox_thresh[1]);
-
+				if(data->is_prox_cal)
+					proximity_calibration_off(data);
 			}
 			break;
 #endif // CONFIG_SENSROS_SSP_PROXIMITY_THRESH_CAL
@@ -385,17 +386,8 @@ void proximity_calibration_off(struct ssp_data *data)
 
 	ssp_infof("");
 	memcpy(&tempbuf[0], &sample_period, 4);
-
 	data->is_prox_cal = false;
 	make_command(data, REMOVE_SENSOR, SENSOR_TYPE_PROXIMITY_RAW, tempbuf, 4);
-}
-
-void prox_cali_off_task(struct work_struct *work)
-{
-	struct ssp_data *data = container_of((struct delayed_work *)work,
-	                                     struct ssp_data, work_prox_cal_off);
-
-	proximity_calibration_off(data);
 }
 
 void do_proximity_calibration(struct ssp_data *data)
@@ -404,13 +396,11 @@ void do_proximity_calibration(struct ssp_data *data)
 	int sample_period = 10;
 
 	ssp_infof("");
+	
+	data->is_prox_cal = true;
 	memcpy(&tempbuf[0], &sample_period, 4);
 
-    data->is_prox_cal = true;
 	make_command(data, ADD_SENSOR, SENSOR_TYPE_PROXIMITY_RAW, tempbuf, 8);
-	
-	INIT_DELAYED_WORK(&data->work_prox_cal_off, prox_cali_off_task);
-	schedule_delayed_work(&data->work_prox_cal_off, msecs_to_jiffies(600));
 }
 #endif
 
@@ -801,7 +791,7 @@ int mag_open_calibration(struct ssp_data *data)
 	int ret = 0;
 	mm_segment_t old_fs;
 	struct file *cal_filp = NULL;
-	char buffer[7] = {0,};
+	char buffer[14] = {0,};
 	
 	old_fs = get_fs();
 	set_fs(KERNEL_DS);
@@ -811,10 +801,7 @@ int mag_open_calibration(struct ssp_data *data)
 	if (IS_ERR(cal_filp)) {
 		set_fs(old_fs);
 		ret = PTR_ERR(cal_filp);
-
-		data->magcal.x = 0;
-		data->magcal.y = 0;
-		data->magcal.z = 0;
+		memset(&data->magcal, 0, sizeof(data->magcal));
 
 		pr_err("[SSP]: %s - Can't open calibration file %d\n", __func__, ret);
 		return ret;
@@ -823,44 +810,54 @@ int mag_open_calibration(struct ssp_data *data)
 	ret = vfs_read(cal_filp, buffer, sizeof(buffer), &cal_filp->f_pos);
 	if ((ret != sizeof(buffer))) {
 		ret = -EIO;
-		data->magcal.x = 0;
-		data->magcal.y = 0;
-		data->magcal.z = 0;
+		memset(&data->magcal, 0, sizeof(data->magcal));
 	}
 
 	if(buffer[0] == 'M')
-		memcpy(&data->magcal, &buffer[1], 6);
+	{
+		data->magcal.accuracy = buffer[1];
+		memcpy(&data->magcal.offset_x, (s16*)&buffer[2], sizeof(s16));
+		memcpy(&data->magcal.offset_y, (s16*)&buffer[4], sizeof(s16));
+		memcpy(&data->magcal.offset_z, (s16*)&buffer[6], sizeof(s16));
+		memcpy(&data->magcal.flucv_x, (s16*)&buffer[8], sizeof(s16));
+		memcpy(&data->magcal.flucv_y, (s16*)&buffer[10], sizeof(s16));
+		memcpy(&data->magcal.flucv_z, (s16*)&buffer[12], sizeof(s16));
+	}
 	else 
 	{
-		data->magcal.x = 0;
-		data->magcal.y = 0;
-		data->magcal.z = 0;
+		memset(&data->magcal, 0, sizeof(data->magcal));
 	}
 
 	filp_close(cal_filp, current->files);
 	set_fs(old_fs);
 
-	ssp_info("open mag calibration %d, %d, %d",
-	         data->magcal.x, data->magcal.y, data->magcal.z);
+	ssp_infof("%u, %d, %d, %d, %d, %d, %d",
+		data->magcal.accuracy, data->magcal.offset_x, data->magcal.offset_y, data->magcal.offset_z,
+		data->magcal.flucv_x, data->magcal.flucv_y, data->magcal.flucv_z);
 	return ret;
 }
 
-int save_mag_cal_data(struct ssp_data *data, s16 *cal_data)
+int save_mag_cal_data(struct ssp_data *data, u8 *cal_data)
 {
 	int ret = 0;
 	struct file *cal_filp = NULL;
 	mm_segment_t old_fs;
-	char buffer[7] = {0,};
-	
-	data->magcal.x = cal_data[0];
-	data->magcal.y = cal_data[1];
-	data->magcal.z = cal_data[2];
+	char buffer[14] = {0,};
 
-	ssp_info("do mag calibrate %d, %d, %d",
-	         data->magcal.x, data->magcal.y, data->magcal.z);
+	data->magcal.accuracy = cal_data[0];
+	memcpy(&data->magcal.offset_x, (s16*)&cal_data[1], sizeof(s16));
+	memcpy(&data->magcal.offset_y, (s16*)&cal_data[3], sizeof(s16));
+	memcpy(&data->magcal.offset_z, (s16*)&cal_data[5], sizeof(s16));
+	memcpy(&data->magcal.flucv_x, (s16*)&cal_data[7], sizeof(s16));
+	memcpy(&data->magcal.flucv_y, (s16*)&cal_data[9], sizeof(s16));
+	memcpy(&data->magcal.flucv_z, (s16*)&cal_data[11], sizeof(s16));
+	
+	ssp_infof("%u, %d, %d, %d, %d, %d, %d",
+		data->magcal.accuracy, data->magcal.offset_x, data->magcal.offset_y, data->magcal.offset_z,
+		data->magcal.flucv_x, data->magcal.flucv_y, data->magcal.flucv_z);
 
 	buffer[0] = 'M';
-	memcpy(&buffer[1], &data->magcal, sizeof(data->magcal));
+	memcpy(&buffer[1], cal_data, 13);
 
 	old_fs = get_fs();
 	set_fs(KERNEL_DS);
@@ -890,7 +887,7 @@ int save_mag_cal_data(struct ssp_data *data, s16 *cal_data)
 int set_mag_cal(struct ssp_data *data)
 {
 	int ret = 0;
-	s16 mag_cal[3] = {0, };
+	char buffer[13];
 
 	if (!(data->sensor_probe_state & (1ULL << SENSOR_TYPE_GEOMAGNETIC_FIELD))) {
 		pr_info("[SSP]: %s - Skip this function!!!"\
@@ -899,20 +896,25 @@ int set_mag_cal(struct ssp_data *data)
 		return ret;
 	}
 
-	mag_cal[0] = data->magcal.x;
-	mag_cal[1] = data->magcal.y;
-	mag_cal[2] = data->magcal.z;
+	buffer[0] = data->magcal.accuracy;
+	memcpy(&buffer[1], &data->magcal.offset_x, sizeof(s16));
+	memcpy(&buffer[3], &data->magcal.offset_y, sizeof(s16));
+	memcpy(&buffer[5], &data->magcal.offset_z, sizeof(s16));
+	memcpy(&buffer[7], &data->magcal.flucv_x, sizeof(s16));
+	memcpy(&buffer[9], &data->magcal.flucv_y, sizeof(s16));
+	memcpy(&buffer[11], &data->magcal.flucv_z, sizeof(s16)); 
 
 	ret = ssp_send_command(data, CMD_SETVALUE, SENSOR_TYPE_GEOMAGNETIC_FIELD, CAL_DATA, 0,
-	                       (char *)mag_cal, 6 * sizeof(char), NULL, NULL);
+	                       (char *)&buffer, sizeof(buffer), NULL, NULL);
 
 	if (ret != SUCCESS) {
 		ssp_errf("ssp_send_command Fail %d", ret);
 		goto exit;
 	}
 
-	pr_info("[SSP] Set mag cal data %d, %d, %d\n",
-	        data->magcal.x, data->magcal.y, data->magcal.z);
+	ssp_infof("%u, %d, %d, %d, %d, %d, %d",
+		data->magcal.accuracy, data->magcal.offset_x, data->magcal.offset_y, data->magcal.offset_z,
+		data->magcal.flucv_x, data->magcal.flucv_y, data->magcal.flucv_z);
 exit:
 	return ret;
 }

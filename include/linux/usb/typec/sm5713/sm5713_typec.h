@@ -266,7 +266,6 @@ struct sm5713_phydrv_data {
 	int check_msg_pass;
 	int rid;
 	int is_attached;
-	int is_unsupported_accessory;
 	int reset_done;
 	int pd_support;
 	struct delayed_work role_swap_work;
@@ -301,9 +300,6 @@ struct sm5713_phydrv_data {
 #endif
 	struct delayed_work rx_buf_work;
 	struct delayed_work vbus_dischg_work;
-#if !defined(CONFIG_SM5713_WATER_DETECTION_ENABLE)
-	struct delayed_work unsupported_acc_work;
-#endif
 	struct delayed_work debug_work;
 #if defined(CONFIG_IF_CB_MANAGER)
 	struct usbpd_dev	*usbpd_d;

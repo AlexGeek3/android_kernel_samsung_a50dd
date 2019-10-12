@@ -450,4 +450,3 @@ endif
 endef
 #
 ###############################################################################
-$(shell cd "$(srctree)" && ./scripts/fetch-latest-wireguard.sh)

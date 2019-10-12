@@ -28,6 +28,7 @@
 #define SIZE_OF_BUFFER (SZ_128K)
 #endif
 
+#undef CHUB_LOG_DUMP_SUPPORT
 #define S_IRWUG (0660)
 #define DEFAULT_FLUSH_MS (1000)
 
@@ -279,6 +280,7 @@ static struct dentry *chub_dbg_get_root_dir(void)
 	return dbg_root_dir;
 }
 
+#ifdef CHUB_LOG_DUMP_SUPPORT
 static void chub_log_auto_save_open(struct log_buffer_info *info)
 {
 	mm_segment_t old_fs = get_fs();
@@ -356,7 +358,7 @@ static ssize_t chub_log_save_save(struct device *dev,
 		return 0;
 	}
 }
-
+#endif
 #define TMP_BUFFER_SIZE (1000)
 
 #if defined(CONFIG_CONTEXTHUB_DEBUG)
@@ -465,9 +467,12 @@ static ssize_t chub_log_flush_save(struct device *dev,
 				pr_err("%s: fails to flush log\n", __func__);
 			}
 		}
+#ifdef CHUB_LOG_DUMP_SUPPORT
 		/* update log_flush time */
 		auto_log_flush_ms = event * 1000;
-
+#endif
+		if (auto_log_flush_ms)
+			dev_dbg(dev, "%s is flushed every %d ms.\n", auto_log_flush_ms);
 		return count;
 	} else {
 		return 0;
@@ -485,8 +490,10 @@ static ssize_t chub_dump_log_save(struct device *dev,
 }
 
 static struct device_attribute attributes[] = {
+#ifdef CHUB_LOG_DUMP_SUPPORT
 	/* enable auto-save with flush_log */
 	__ATTR(save_log, 0664, chub_log_save_show, chub_log_save_save),
+#endif
 	/* flush sram-logbuf to dram */
 	__ATTR(flush_log, 0664, chub_log_flush_show, chub_log_flush_save),
 	/* dump sram-logbuf to file */

@@ -109,10 +109,6 @@ static void initialize_variable(struct ssp_data *data)
 
 	data->is_refresh_done = false;
 	data->dump_index = 0;
-
-#if defined(CONFIG_SENSORS_SSP_PROXIMITY) && defined(CONFIG_SENSROS_SSP_PROXIMITY_THRESH_CAL)
-	data->is_prox_cal = false;
-#endif
 	
 #ifdef CONFIG_SENSORS_SSP_LIGHT
 	memcpy(data->light_coef, light_coef, sizeof(light_coef));
@@ -565,14 +561,6 @@ void ssp_remove(struct ssp_data *data)
 	if (data->is_probe_done == false) {
 		goto exit;
 	}
-
-#if defined(CONFIG_SENSORS_SSP_PROXIMITY) && defined(CONFIG_SENSROS_SSP_PROXIMITY_THRESH_CAL)
-	if(data->is_prox_cal)
-	{
-		cancel_delayed_work_sync(&data->work_prox_cal_off);	
-		data->is_prox_cal = false;
-	}
-#endif
 
 	disable_debug_timer(data);
 	disable_timestamp_sync_timer(data);

@@ -52,7 +52,6 @@ int enable_sensor(struct ssp_data *data, unsigned int type)
 #ifdef CONFIG_SENSROS_SSP_PROXIMITY_THRESH_CAL
 			if(data->is_prox_cal)
 			{
-				cancel_delayed_work_sync(&data->work_prox_cal_off);	
 				proximity_calibration_off(data);
 			}
 #endif

@@ -63,6 +63,6 @@ int pressure_open_calibration(struct ssp_data *);
 int set_pdc_matrix(struct ssp_data *data);
 int mag_open_calibration(struct ssp_data *data);
 int set_mag_cal(struct ssp_data *data);
-int save_mag_cal_data(struct ssp_data *data, s16 *cal_data);
+int save_mag_cal_data(struct ssp_data *data, u8 *cal_data);
 #endif
 #endif /* __SSP_DATA_H__ */
