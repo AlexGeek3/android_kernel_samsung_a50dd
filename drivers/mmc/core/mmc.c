@@ -623,8 +623,8 @@ static int mmc_decode_ext_csd(struct mmc_card *card, u8 *ext_csd)
 	/* eMMC v5 or later */
 	if (card->ext_csd.rev >= 7) {
 		u64 mmc_fwrev = 0;
-
-		for (int i = 0 ; i < MMC_FIRMWARE_LEN ; i++) {
+		int i;
+		for (i = 0 ; i < MMC_FIRMWARE_LEN ; i++) {
 			card->ext_csd.fwrev[i] =
 				ext_csd[EXT_CSD_FIRMWARE_VERSION + MMC_FIRMWARE_LEN - 1 - i];
 			mmc_fwrev |= card->ext_csd.fwrev[i] << ((MMC_FIRMWARE_LEN - 1 - i) << 3);
