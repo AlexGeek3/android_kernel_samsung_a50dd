@@ -8,6 +8,4 @@ if VISION_SUPPORT
 
 source "drivers/vision/vipx/Kconfig"
 
-source "drivers/vision/vipx_vertex/Kconfig"
-
 endif # VISION_SUPPORT

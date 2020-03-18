@@ -45,7 +45,7 @@
 	#include <linux/syscalls.h>
 	#include <linux/string.h>
 	#if defined( DG_SOC_SEC )
-		#include <linux/sec_sysfs.h>
+		#include <linux/sec_class.h>
 	#endif
 
 	#include <asm/siginfo.h>

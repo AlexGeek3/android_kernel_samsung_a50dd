@@ -36,25 +36,6 @@ static char *sm5713_supplied_to[] = {
 };
 
 static enum power_supply_property sm5713_charger_props[] = {
-    POWER_SUPPLY_PROP_STATUS,
-    POWER_SUPPLY_PROP_CHARGING_ENABLED,
-    POWER_SUPPLY_PROP_PRESENT,
-    POWER_SUPPLY_PROP_CHARGE_TYPE,
-    POWER_SUPPLY_PROP_HEALTH,
-    POWER_SUPPLY_PROP_ONLINE,
-    POWER_SUPPLY_PROP_CURRENT_MAX,
-    POWER_SUPPLY_PROP_CURRENT_AVG,
-    POWER_SUPPLY_PROP_CURRENT_NOW,
-    POWER_SUPPLY_PROP_CURRENT_FULL,
-#if defined(CONFIG_BATTERY_SWELLING)
-    POWER_SUPPLY_PROP_VOLTAGE_MAX,
-#endif
-    POWER_SUPPLY_PROP_CHARGE_OTG_CONTROL,
-    POWER_SUPPLY_PROP_USB_HC,
-    POWER_SUPPLY_PROP_ENERGY_NOW,
-#if defined(CONFIG_AFC_CHARGER_MODE)
-    POWER_SUPPLY_PROP_AFC_CHARGER_MODE,
-#endif
 };
 
 static enum power_supply_property sm5713_otg_props[] = {
@@ -106,6 +87,22 @@ static void chg_set_aicl(struct sm5713_charger_data *charger, bool enable, u8 ai
 static void chg_set_dischg_limit(struct sm5713_charger_data *charger, u8 dischg)
 {
     sm5713_update_reg(charger->i2c, SM5713_CHG_REG_CHGCNTL6, (dischg << 2), (0x3 << 2));
+}
+
+static void chg_set_ocp_current(struct sm5713_charger_data *charger, u32 ocp_current)
+{
+	u8 dischg = DISCHG_LIMIT_C_4_5;
+
+	if (ocp_current >= 6000)
+		dischg = DISCHG_LIMIT_C_6_0;
+	else if (ocp_current >= 5000)
+		dischg = DISCHG_LIMIT_C_5_0;
+	else if (ocp_current >= 4500)
+		dischg = DISCHG_LIMIT_C_4_5;
+	else
+		dischg = DISCHG_LIMIT_C_3_5;
+
+	chg_set_dischg_limit(charger, dischg);		
 }
 
 static void chg_set_batreg(struct sm5713_charger_data *charger, u16 float_voltage)
@@ -430,7 +427,7 @@ static int psy_chg_get_status(struct sm5713_charger_data *charger)
 static int psy_chg_get_health(struct sm5713_charger_data *charger)
 {
 	u8 reg;
-	int health = POWER_SUPPLY_HEALTH_UNKNOWN;
+	int health = POWER_SUPPLY_HEALTH_GOOD;
 
 	if (charger->is_charging) {
 		chg_set_wdt_tmr_reset(charger);
@@ -987,7 +984,7 @@ static irqreturn_t chg_otgfail_isr(int irq, void *data)
 static inline void sm5713_chg_init(struct sm5713_charger_data *charger)
 {
     chg_set_aicl(charger, 1, AICL_TH_V_4_5);
-    chg_set_dischg_limit(charger, DISCHG_LIMIT_C_4_5);
+    chg_set_ocp_current(charger, charger->pdata->chg_ocp_current);
     chg_set_batreg(charger, charger->pdata->chg_float_voltage);
     chg_set_iq3limit(charger, BST_IQ3LIMIT_C_4_0);
     chg_set_wdt_timer(charger, WDT_TIME_S_90);
@@ -1019,6 +1016,16 @@ static int sm5713_charger_parse_dt(struct device *dev,
 		}
 		pr_info("%s: battery,chg_float_voltage is %d\n",
 			__func__, pdata->chg_float_voltage);
+
+		ret = of_property_read_u32(np, "battery,chg_ocp_current",
+					   &pdata->chg_ocp_current);
+		if (ret) {
+			pr_info("%s: battery,chg_ocp_current is Empty\n", __func__);
+			pdata->chg_ocp_current = 4500; /* mA */
+		}
+		pr_info("%s: battery,chg_ocp_current is %d\n", __func__,
+			pdata->chg_ocp_current);
+
 	}
 
 	dev_info(dev, "%s: parse dt done.\n", __func__);
@@ -1179,9 +1186,9 @@ static int sm5713_charger_probe(struct platform_device *pdev)
 	return 0;
 
 err_reg_irq:
-	power_supply_unregister(charger->psy_chg);
-err_power_supply_register_otg:
 	power_supply_unregister(charger->psy_otg);
+err_power_supply_register_otg:
+	power_supply_unregister(charger->psy_chg);
 err_power_supply_register:
 err_parse_dt:
 err_parse_dt_nomem:

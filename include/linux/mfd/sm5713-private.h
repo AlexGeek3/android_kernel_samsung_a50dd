@@ -185,6 +185,7 @@ enum sm5713_fuelgauge_reg {
     SM5713_FG_REG_VOLT_CAL          = 0x6F,
 
     SM5713_FG_REG_VOLT_TEMP_CAL     = 0x70,
+    SM5713_FG_REG_VSBC_VOLT_TEMP_CAL= 0x71,
     SM5713_FG_REG_DP_EV_I_OFF       = 0x74,
     SM5713_FG_REG_DP_EV_I_SLO       = 0x75,
     SM5713_FG_REG_DP_CSP_I_OFF      = 0x76,
@@ -218,6 +219,7 @@ enum sm5713_fuelgauge_reg {
     SM5713_FG_REG_AUX_2             = 0x93,
     SM5713_FG_REG_AUX_3             = 0x94,
     SM5713_FG_REG_AUX_STAT          = 0x95,
+    SM5713_FG_REG_BAT_PTT1          = 0x96,
     SM5713_FG_REG_V_ALARM_HYS       = 0x99,
     SM5713_FG_REG_AGING_CTRL        = 0x9C,
 

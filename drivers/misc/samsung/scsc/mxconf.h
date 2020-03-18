@@ -48,7 +48,7 @@
  *  mismatches.
  */
 #define MXCONF_VERSION_MAJOR 0
-#define MXCONF_VERSION_MINOR 4 /* For Common HCF override */
+#define MXCONF_VERSION_MINOR 5 /* For fleximac moredump */
 
 /* Types */
 
@@ -174,6 +174,14 @@ struct mxconf {
 	 * Common HCF offset
 	 */
 	struct mxmibref fwconfig;
+
+	/* FROM MINOR_5 */
+
+	/* Fleximac Cortex-M3_1 piggy back as M4 channel.
+	 * (Driver must initialise from-ap buffer address to 0
+	 * if channel is not in use).
+	 */
+	struct mxtransconf   mx_trans_conf_gdb_m4_1;
 
 } __MXPACKED;
 

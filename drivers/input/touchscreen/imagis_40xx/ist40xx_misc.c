@@ -859,6 +859,7 @@ err_read_cp:
 	ist40xx_start(data);
 	ist40xx_enable_irq(data);
 
+	kfree(tmp_buf);  // Prevent CID: 56767
 	return ret;
 
 }

@@ -22,9 +22,8 @@
 
 #ifdef SEC_FACTORY_MODE
 
-#if defined(CONFIG_SEC_SYSFS)
-#include <linux/sec_sysfs.h>
-#elif defined(CONFIG_DRV_SAMSUNG)
+#if defined(CONFIG_DRV_SAMSUNG)
+#include <linux/sec_class.h>
 #endif
 
 #define COMMAND_LENGTH		(64)
@@ -170,6 +169,15 @@ static void fw_update(void *dev_data)
 	struct ist40xx_data *data = container_of(sec, struct ist40xx_data, sec);
 
 	sec_cmd_set_default_result(sec);
+#if defined(CONFIG_SAMSUNG_PRODUCT_SHIP)
+	if (sec->cmd_param[0] == 1) {
+		sec->cmd_state = SEC_CMD_STATUS_OK;
+		snprintf(buf, sizeof(buf), "OK");
+		sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
+		input_info(true, &data->client->dev, "%s: user_ship binary, success\n", __func__);
+		return;
+	}
+#endif
 
 	if (data->status.sys_mode != STATE_POWER_ON) {
 		input_err(true, &data->client->dev,
@@ -307,7 +315,9 @@ static void get_fw_ver_bin(void *dev_data)
 
 	sec_cmd_set_default_result(sec);
 
-	ver = ist40xx_parse_ver(data, FLAG_FW, data->fw.buf);
+	if (data->dt_data->bringup != 1) {
+		ver = ist40xx_parse_ver(data, FLAG_FW, data->fw.buf);
+	}
 	snprintf(buf, sizeof(buf), "IM%08X", ver);
 	sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
 
@@ -480,7 +490,7 @@ static void call_mode(void *dev_data)
 	switch (sec->cmd_param[0]) {
 	case 0:
 		sec->cmd_state = SEC_CMD_STATUS_OK;
-		input_info(true, &data->client->dev, "%s: Unset Rejectzone Mode\n",
+		input_info(true, &data->client->dev, "%s: Unset Call Mode\n",
 			   __func__);
 
 		ist40xx_set_call_mode(0);
@@ -488,7 +498,7 @@ static void call_mode(void *dev_data)
 		break;
 	case 1:
 		sec->cmd_state = SEC_CMD_STATUS_OK;
-		input_info(true, &data->client->dev, "%s: Set Rejectzone Mode\n",
+		input_info(true, &data->client->dev, "%s: Set Call Mode\n",
 			   __func__);
 
 		ist40xx_set_call_mode(1);
@@ -742,7 +752,7 @@ static void spay_enable(void *dev_data)
 
 	if (data->status.sys_mode != STATE_POWER_OFF) {
 		ret = ist40xx_write_sponge_reg(data, IST40XX_SPONGE_CTRL,
-				(u16*)&data->lpm_mode, 1);
+				(u16*)&data->lpm_mode, 1, true);
 		if (ret) {
 			sec->cmd_state = SEC_CMD_STATUS_FAIL;
 			input_err(true, &data->client->dev,
@@ -773,6 +783,75 @@ err:
 
 	input_info(true, &data->client->dev, "%s: %s(%d)\n", __func__, buf,
 		   (int)strnlen(buf, sizeof(buf)));
+}
+
+static void aot_enable(void *dev_data)
+{
+	int ret;
+	char buf[16] = { 0 };
+	struct sec_cmd_data *sec = (struct sec_cmd_data *)dev_data;
+	struct ist40xx_data *data = container_of(sec, struct ist40xx_data, sec);
+
+	sec_cmd_set_default_result(sec);
+
+	switch (sec->cmd_param[0]) {
+	case 0:
+		sec->cmd_state = SEC_CMD_STATUS_OK;
+		input_info(true, &data->client->dev, "%s: Unset AOT Mode\n",
+			__func__);
+
+		data->lpm_mode &= ~IST40XX_DOUBLETAP_WAKEUP;
+
+		break;
+	case 1:
+		sec->cmd_state = SEC_CMD_STATUS_OK;
+		input_info(true, &data->client->dev, "%s: Set AOT Mode\n",
+			__func__);
+
+		data->lpm_mode |= IST40XX_DOUBLETAP_WAKEUP;
+
+		break;
+	default:
+		sec->cmd_state = SEC_CMD_STATUS_FAIL;
+		input_info(true, &data->client->dev, "%s: Invalid Argument\n",
+			__func__);
+
+		break;
+	}
+
+	if (data->status.sys_mode != STATE_POWER_OFF) {
+		ret = ist40xx_write_sponge_reg(data, IST40XX_SPONGE_CTRL,
+				(u16*)&data->lpm_mode, 1, true);
+		if (ret) {
+			sec->cmd_state = SEC_CMD_STATUS_FAIL;
+			input_err(true, &data->client->dev,
+				"%s: fail to write sponge reg.\n", __func__);
+
+			goto err;
+		}
+
+		ret = ist40xx_write_cmd(data, IST40XX_HIB_CMD,
+				(eHCOM_NOTIRY_G_REGMAP << 16) | IST40XX_ENABLE);
+		if (ret) {
+			sec->cmd_state = SEC_CMD_STATUS_FAIL;
+			input_err(true, &data->client->dev,
+				"%s: fail to write notify packet.\n", __func__);
+
+			goto err;
+		}
+	}
+
+err:
+	if (sec->cmd_state == SEC_CMD_STATUS_OK)
+		snprintf(buf, sizeof(buf), "OK");
+	else
+		snprintf(buf, sizeof(buf), "NG");
+
+	sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
+	sec_cmd_set_cmd_exit(sec);
+
+	input_info(true, &data->client->dev, "%s: %s(%d)\n", __func__, buf,
+			(int)strnlen(buf, sizeof(buf)));
 }
 
 static void aod_enable(void *dev_data)
@@ -811,7 +890,7 @@ static void aod_enable(void *dev_data)
 
 	if (data->status.sys_mode != STATE_POWER_OFF) {
 		ret = ist40xx_write_sponge_reg(data, IST40XX_SPONGE_CTRL,
-				(u16*)&data->lpm_mode, 1);
+				(u16*)&data->lpm_mode, 1, true);
 		if (ret) {
 			sec->cmd_state = SEC_CMD_STATUS_FAIL;
 			input_err(true, &data->client->dev,
@@ -848,7 +927,6 @@ static void set_aod_rect(void *dev_data)
 {
 	int i;
 	int ret;
-	u16 rect_data[4];
 	char buf[16] = { 0 };
 	struct sec_cmd_data *sec = (struct sec_cmd_data *)dev_data;
 	struct ist40xx_data *data = container_of(sec, struct ist40xx_data, sec);
@@ -857,42 +935,32 @@ static void set_aod_rect(void *dev_data)
 
 	sec->cmd_state = SEC_CMD_STATUS_OK;
 
+	for (i = 0; i < 4; i++)
+		data->rect_data[i] = sec->cmd_param[i];
+	
 	if (data->status.sys_mode == STATE_LPM) {
-		ist40xx_disable_irq(data);
-		ist40xx_intr_wait(data, 30);
-		mutex_lock(&data->aod_lock);
-
-		for (i = 0; i < 4; i++)
-			rect_data[i] = sec->cmd_param[i];
-
-		ret = ist40xx_write_sponge_reg(data, IST40XX_SPONGE_RECT, rect_data, 4);
+		ret = ist40xx_burst_write(data->client, IST40XX_HIB_SPONGE_RECT,
+						(u32 *)data->rect_data, 2);
 		if (ret) {
 			sec->cmd_state = SEC_CMD_STATUS_FAIL;
 			input_err(true, &data->client->dev,
-				  "%s: fail to write rect(idx)\n", __func__);
+						"%s: fail to write rect\n", __func__);
 
 			goto err_rect;
 		}
 
 		ret = ist40xx_write_cmd(data, IST40XX_HIB_CMD,
-				(eHCOM_NOTIRY_G_REGMAP << 16) | (IST40XX_ENABLE & 0xFFFF));
+						(eHCOM_SET_AOD_RECT << 16) | (IST40XX_ENABLE & 0xFFFF));
 		if (ret) {
 			sec->cmd_state = SEC_CMD_STATUS_FAIL;
 			input_err(true, &data->client->dev,
-				  "%s: fail to write notify packet.\n", __func__);
+						"%s: fail to write rect notify.\n", __func__);
 
 			goto err_rect;
 		}
-
-		for (i = 0; i < 4; i++)
-			data->rect_data[i] = rect_data[i];
-
-err_rect:
-		ist40xx_enable_irq(data);
-		data->status.noise_mode = false;
-		mutex_unlock(&data->aod_lock);
 	}
 
+err_rect:
 	if (sec->cmd_state == SEC_CMD_STATUS_OK)
 		snprintf(buf, sizeof(buf), "OK");
 	else
@@ -959,7 +1027,7 @@ static void singletap_enable(void *dev_data)
 
 	if (data->status.sys_mode != STATE_POWER_OFF) {
 		ret = ist40xx_write_sponge_reg(data, IST40XX_SPONGE_CTRL,
-				(u16*)&data->lpm_mode, 1);
+				(u16*)&data->lpm_mode, 1, true);
 		if (ret) {
 			sec->cmd_state = SEC_CMD_STATUS_FAIL;
 			input_err(true, &data->client->dev,
@@ -977,6 +1045,85 @@ static void singletap_enable(void *dev_data)
 
 			goto err;
 		}
+	}
+
+err:
+	if (sec->cmd_state == SEC_CMD_STATUS_OK)
+		snprintf(buf, sizeof(buf), "OK");
+	else
+		snprintf(buf, sizeof(buf), "NG");
+
+	sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
+	sec_cmd_set_cmd_exit(sec);
+
+	input_info(true, &data->client->dev, "%s: %s(%d)\n", __func__, buf,
+		   (int)strnlen(buf, sizeof(buf)));
+}
+
+static void fod_enable(void *dev_data)
+{
+	int ret;
+	char buf[16] = { 0 };
+	u8 fod_property;
+	struct sec_cmd_data *sec = (struct sec_cmd_data *)dev_data;
+	struct ist40xx_data *data = container_of(sec, struct ist40xx_data, sec);
+
+	sec_cmd_set_default_result(sec);
+
+	if (!data->dt_data->support_fod) {
+		input_err(true, &data->client->dev, "%s not supported\n", __func__);
+		snprintf(buf, sizeof(buf), "%s", "NA");
+		sec->cmd_state = SEC_CMD_STATUS_NOT_APPLICABLE;
+		sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
+		sec_cmd_set_cmd_exit(sec);
+		return;
+	}
+
+	fod_property = !!sec->cmd_param[1];
+
+	switch (sec->cmd_param[0]) {
+	case 0:
+		sec->cmd_state = SEC_CMD_STATUS_OK;
+		input_info(true, &data->client->dev, "%s: Unset FOD Mode\n",
+			   __func__);
+
+		data->lpm_mode &= ~IST40XX_FOD;
+		data->fod_property = fod_property;
+
+		ret = ist40xx_write_cmd(data, IST40XX_HIB_CMD,
+			(eHCOM_SET_FOD_DISABLE << 16) | data->fod_property);
+		if (ret) {
+			sec->cmd_state = SEC_CMD_STATUS_FAIL;
+			input_err(true, &data->client->dev,
+					"%s: fail to write fod disable.\n", __func__);
+			goto err;
+		}
+
+		break;
+	case 1:
+		sec->cmd_state = SEC_CMD_STATUS_OK;
+		input_info(true, &data->client->dev, "%s: Set FOD Mode\n",
+			   __func__);
+
+		data->lpm_mode |= IST40XX_FOD;
+		data->fod_property = fod_property;
+
+		ret = ist40xx_write_cmd(data, IST40XX_HIB_CMD,
+			(eHCOM_SET_FOD_ENABLE << 16) | data->fod_property);
+		if (ret) {
+			sec->cmd_state = SEC_CMD_STATUS_FAIL;
+			input_err(true, &data->client->dev,
+					"%s: fail to write fod enable.\n", __func__);
+			goto err;
+		}
+
+		break;
+	default:
+		sec->cmd_state = SEC_CMD_STATUS_FAIL;
+		input_info(true, &data->client->dev, "%s: Invalid Argument\n",
+			   __func__);
+
+		break;
 	}
 
 err:
@@ -1447,6 +1594,68 @@ out:
 	sec->cmd_state = SEC_CMD_STATUS_FAIL;
 }
 
+void run_miscalibration_all(void *dev_data)
+{
+	int i, ret = 0;
+	int count = 0;
+	char *buf;
+	const int msg_len = 16;
+	char msg[msg_len];
+	char buff[16] = { 0 };
+	struct sec_cmd_data *sec = (struct sec_cmd_data *)dev_data;
+	struct ist40xx_data *data = container_of(sec, struct ist40xx_data, sec);
+	TSP_INFO *tsp = &data->tsp_info;
+	struct TSP_NODE_BUF *node = &tsp->node;
+
+	sec_cmd_set_default_result(sec);
+
+	if (data->status.sys_mode != STATE_POWER_ON) {
+		input_err(true, &data->client->dev,
+			"%s: now sys_mode status is STATE_POWER_OFF!\n",
+			__func__);
+		goto out;
+	}
+
+	ist40xx_delay(300);
+
+	ret = ist40xx_miscalibrate(data);
+	if (ret) {
+		input_err(true, &data->client->dev, "%s: miscalibration fail!\n",
+			__func__);
+		goto out;
+	}
+
+	buf = kmalloc(IST40XX_MAX_NODE_NUM * 5, GFP_KERNEL);
+	if (!buf) {
+		input_err(true, &data->client->dev, "%s: couldn't allocate memory\n",
+			__func__);
+		goto out;
+	}
+
+	memset(buf, 0, IST40XX_MAX_NODE_NUM * 5);
+
+	for (i = 0; i < tsp->ch_num.rx + tsp->ch_num.tx; i++) {
+		count += snprintf(msg, msg_len, "%d,", node->miscal[i]);
+		strncat(buf, msg, msg_len);
+	}
+
+	sec_cmd_set_cmd_result(sec, buf, count - 1);
+
+	sec->cmd_state = SEC_CMD_STATUS_OK;
+	input_info(true, &data->client->dev, "%s: %s(%d)\n", __func__, buf, count - 1);
+
+	kfree(buf);
+
+	return;
+
+out:
+	snprintf(buff, sizeof(buff), "NG");
+	sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
+
+	sec->cmd_state = SEC_CMD_STATUS_FAIL;
+
+}
+
 void get_miscalibration_value(void *dev_data)
 {
 	int idx = 0;
@@ -1556,7 +1765,7 @@ static void run_prox_intensity_read_all(void *dev_data)
 {
 	int ret = 0;
 	u32 sensitivity = 0;
-	char buf[32] = { 0 };
+	char buf[SEC_CMD_STR_LEN] = { 0 };
 	struct sec_cmd_data *sec = (struct sec_cmd_data *)dev_data;
 	struct ist40xx_data *data = container_of(sec, struct ist40xx_data, sec);
 	TSP_INFO *tsp = &data->tsp_info;
@@ -1570,7 +1779,7 @@ static void run_prox_intensity_read_all(void *dev_data)
 		snprintf(buf, sizeof(buf), "%s", "NG");
 		sec->cmd_state = SEC_CMD_STATUS_FAIL;
 	} else {
-		snprintf(buf, sizeof(buf), "%d,%d,%d,%d", (sensitivity >> 16) & 0xFFFF,
+		snprintf(buf, sizeof(buf), "SUM_X:%d SUM_Y:%d THD_X:%d THD_Y:%d", (sensitivity >> 16) & 0xFFFF,
 				sensitivity & 0xFFFF, tsp->prox_tx_threshold, tsp->prox_rx_threshold);
 		sec->cmd_state = SEC_CMD_STATUS_OK;
 	}
@@ -1578,141 +1787,6 @@ static void run_prox_intensity_read_all(void *dev_data)
 	sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
 	input_info(true, &data->client->dev, "%s: %s(%d)\n", __func__, buf,
 		   (int)strnlen(buf, sizeof(buf)));
-}
-
-int run_miscal_for_booting_dump(struct ist40xx_data *data)
-{
-	int ret;
-
-	ret = ist40xx_miscalibrate(data);
-	if (ret) {
-		input_err(true, &data->client->dev, "%s: miscalibration fail!\n",
-			  __func__);
-		return ret;
-	}
-
-	return 0;
-}
-
-void dump_miscal_log(struct ist40xx_data *data)
-{
-	int ii, jj;
-	int val = 0;
-	const int msg_len = 128;
-	char msg[msg_len];
-	char *buf = NULL;
-	TSP_INFO *tsp = &data->tsp_info;
-	struct TSP_NODE_BUF *node = &tsp->node;
-
-	buf = kzalloc(2048, GFP_KERNEL);
-	if (buf == NULL)
-		return;
-	buf[0] = '\0';
-
-	if (tsp->dir.swap_xy) {
-		for (ii = tsp->ch_num.rx - 1; ii >= 0; ii--) {
-			for (jj = tsp->ch_num.tx - 1; jj >= 0; jj--) {
-				val = node->miscal[jj * tsp->ch_num.rx + ii];
-				snprintf(msg, msg_len, "%4d ", val);
-				strncat(buf, msg, msg_len);
-
-				if (jj == 0) {
-					snprintf(msg, msg_len, " | Rx%02d", ii);
-					strncat(buf, msg, msg_len);
-				}
-			}
-
-			input_info(true, &data->client->dev, "%s\n", buf);
-
-			if (ii == 0) {
-				buf[0] = '\0';
-				for (jj = tsp->ch_num.tx - 1; jj >= 0; jj--) {
-					snprintf(msg, msg_len, "-----");
-					strncat(buf, msg, msg_len);
-				}
-
-				input_info(true, &data->client->dev, "%s\n", buf);
-
-				buf[0] = '\0';
-				for (jj = tsp->ch_num.tx - 1; jj >= 0 ; jj--) {
-					snprintf(msg, msg_len, "  %02d ", jj);
-					strncat(buf, msg, msg_len);
-				}
-
-				snprintf(msg, msg_len, " | Tx");
-				strncat(buf, msg, msg_len);
-
-				input_info(true, &data->client->dev, "%s\n", buf);
-			}
-
-			buf[0] = '\0';
-		}
-	} else {
-		for (ii = tsp->ch_num.tx - 1; ii >= 0; ii--) {
-			for (jj = tsp->ch_num.rx - 1; jj >= 0; jj--) {
-				val = node->miscal[ii * tsp->ch_num.rx + jj];
-				snprintf(msg, msg_len, "%4d ", val);
-				strncat(buf, msg, msg_len);
-
-				if (jj == 0) {
-					snprintf(msg, msg_len, " | Tx%02d", ii);
-					strncat(buf, msg, msg_len);
-				}
-			}
-
-			input_info(true, &data->client->dev, "%s\n", buf);
-
-			if (ii == 0) {
-				buf[0] = '\0';
-
-				for (jj = tsp->ch_num.rx - 1; jj >= 0; jj--) {
-					snprintf(msg, msg_len, "-----");
-					strncat(buf, msg, msg_len);
-				}
-
-				input_info(true, &data->client->dev, "%s\n", buf);
-
-				buf[0] = '\0';
-
-				for (jj = tsp->ch_num.rx - 1; jj >= 0 ; jj--) {
-					snprintf(msg, msg_len, "  %02d ", jj);
-					strncat(buf, msg, msg_len);
-				}
-
-				snprintf(msg, msg_len, " | Rx");
-				strncat(buf, msg, msg_len);
-
-				input_info(true, &data->client->dev, "%s\n", buf);
-			}
-
-			buf[0] = '\0';
-		}
-	}
-	/*for max miscal_value */
-
-	input_info(true, &data->client->dev, "### miscal_value - Max: %d ###\n",
-		   data->status.miscalib_result);
-
-	kfree(buf);
-}
-
-void ist40xx_display_dump_log(struct ist40xx_data *data)
-{
-	int ret;
-
-	input_info(true, &data->client->dev, "*** TSP Dump Miscal Value ***\n");
-
-	ret = run_miscal_for_booting_dump(data);
-	if (ret) {
-		input_err(true, &data->client->dev, "TSP Dump Miscal FAILED\n");
-		return;
-	}
-
-	input_info(true, &data->client->dev, "----- miscal_value -----:\n");
-
-	dump_miscal_log(data);
-
-	input_info(true, &data->client->dev, "*** TSP Dump Miscal Value ***\n");
 }
 
 static u16 node_value[IST40XX_MAX_NODE_NUM];
@@ -2010,6 +2084,76 @@ out:
 	sec->cmd_state = SEC_CMD_STATUS_FAIL;
 }
 
+void run_cdc_read_all(void *dev_data)
+{
+	int i;
+	int ret = 0;
+	int count = 0;
+	char *buf;
+	const int msg_len = 16;
+	char msg[msg_len];
+	u8 flag = NODE_FLAG_CDC;
+	char buff[16] = { 0 };
+	struct sec_cmd_data *sec = (struct sec_cmd_data *)dev_data;
+	struct ist40xx_data *data = container_of(sec, struct ist40xx_data, sec);
+	TSP_INFO *tsp = &data->tsp_info;
+
+	sec_cmd_set_default_result(sec);
+
+	if (data->status.sys_mode != STATE_POWER_ON) {
+		input_err(true, &data->client->dev,
+			"%s: now sys_mode status is not STATE_POWER_ON!\n",
+			__func__);
+		goto out;
+	}
+
+	ret = ist40xx_read_touch_node(data, flag, &tsp->node);
+	if (ret) {
+		input_err(true, &data->client->dev, "%s() tsp node read fail!\n",
+			__func__);
+		goto out;
+	}
+
+	ist40xx_parse_touch_node(data, &tsp->node);
+
+	ret = parse_tsp_node(data, flag, &tsp->node, node_value, self_node_value,
+			prox_node_value);
+	if (ret) {
+		input_err(true, &data->client->dev, "%s: tsp node parse fail!\n",
+			__func__);
+		goto out;
+	}
+
+	buf = kmalloc(IST40XX_MAX_NODE_NUM * 5, GFP_KERNEL);
+	if (!buf) {
+		input_err(true, &data->client->dev, "%s: couldn't allocate memory\n",
+			__func__);
+		goto out;
+	}
+
+	memset(buf, 0, IST40XX_MAX_NODE_NUM * 5);
+
+	for (i = 0; i < tsp->screen.rx * tsp->screen.tx; i++) {
+			count += snprintf(msg, msg_len, "%d,", node_value[i]);
+			strncat(buf, msg, msg_len);
+	}
+
+	sec_cmd_set_cmd_result(sec, buf, count - 1);
+
+	sec->cmd_state = SEC_CMD_STATUS_OK;
+	input_info(true, &data->client->dev, "%s: %s(%d)\n", __func__, buf, count - 1);
+
+	kfree(buf);
+
+	return;
+
+out:
+	snprintf(buff, sizeof(buff), "NG");
+	sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
+
+	sec->cmd_state = SEC_CMD_STATUS_FAIL;
+}
+
 void run_self_cdc_read(void *dev_data)
 {
 	int i;
@@ -2145,6 +2289,110 @@ out:
 	sec->cmd_state = SEC_CMD_STATUS_FAIL;
 }
 
+void run_self_cdc_read_all(void *dev_data)
+{
+	int i;
+	int ret = 0;
+	int count = 0;
+	char *buf;
+	const int msg_len = 16;
+	char msg[msg_len];
+	u8 flag = NODE_FLAG_CDC;
+	char buff[16] = { 0 };
+	struct sec_cmd_data *sec = (struct sec_cmd_data *)dev_data;
+	struct ist40xx_data *data = container_of(sec, struct ist40xx_data, sec);
+	TSP_INFO *tsp = &data->tsp_info;
+
+	sec_cmd_set_default_result(sec);
+
+	if (data->status.sys_mode != STATE_POWER_ON) {
+		input_err(true, &data->client->dev,
+			"%s: now sys_mode status is not STATE_POWER_ON!\n",
+			__func__);
+		goto out;
+	}
+
+	ret = ist40xx_write_cmd(data, IST40XX_HIB_CMD,
+			(eHCOM_SET_TIME_ACTIVE << 16) | 30000);
+	if (ret) {
+		input_err(true, &data->client->dev, "%s: write active time fail!\n",
+			__func__);
+		goto out;
+	}
+
+	ret = ist40xx_write_cmd(data, IST40XX_HIB_CMD,
+			(eHCOM_SET_TIME_IDLE << 16) | 30000);
+	if (ret) {
+		input_err(true, &data->client->dev, "%s: write idle time fail!\n",
+			__func__);
+		goto out;
+	}
+
+	ist40xx_delay(200);
+
+	ret = ist40xx_read_touch_node(data, flag, &tsp->node);
+	if (ret) {
+		input_err(true, &data->client->dev, "%s: tsp node read fail!\n",
+			__func__);
+		goto out;
+	}
+
+	ret = ist40xx_write_cmd(data, IST40XX_HIB_CMD,
+			  (eHCOM_SET_TIME_ACTIVE << 16) | 0xFFFF);
+	if (ret) {
+		input_err(true, &data->client->dev, "%s: write active time fail!\n",
+			__func__);
+		goto out;
+	}
+
+	ret = ist40xx_write_cmd(data, IST40XX_HIB_CMD,
+			  (eHCOM_SET_TIME_IDLE << 16) | 0xFFFF);
+	if (ret) {
+		input_err(true, &data->client->dev, "%s: write idle time fail!\n",
+			__func__);
+		goto out;
+	}
+
+	ist40xx_parse_touch_node(data, &tsp->node);
+
+	ret = parse_tsp_node(data, flag, &tsp->node, node_value, self_node_value,
+			prox_node_value);
+	if (ret) {
+		input_err(true, &data->client->dev, "%s: tsp node parse fail!\n",
+			__func__);
+		goto out;
+	}
+
+	buf = kmalloc(IST40XX_MAX_NODE_NUM * 5, GFP_KERNEL);
+	if (!buf) {
+		input_err(true, &data->client->dev, "%s: couldn't allocate memory\n",
+			__func__);
+		goto out;
+	}
+
+	memset(buf, 0, IST40XX_MAX_NODE_NUM * 5);
+
+	for (i = 0; i < tsp->ch_num.tx + tsp->ch_num.rx; i++) {
+			count += snprintf(msg, msg_len, "%d,", self_node_value[i]);
+			strncat(buf, msg, msg_len);
+	}
+
+	sec_cmd_set_cmd_result(sec, buf, count - 1);
+
+	sec->cmd_state = SEC_CMD_STATUS_OK;
+	input_info(true, &data->client->dev, "%s: %s(%d)\n", __func__, buf, count - 1);
+
+	kfree(buf);
+
+	return;
+
+out:
+	snprintf(buff, sizeof(buff), "NG");
+	sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
+
+	sec->cmd_state = SEC_CMD_STATUS_FAIL;
+}
+
 void run_prox_cdc_read(void *dev_data)
 {
 	int i;
@@ -2219,10 +2467,10 @@ void run_prox_cdc_read(void *dev_data)
 			 max_val_rx);
 		sec_cmd_set_cmd_result_all(sec, buf_onecmd_1,
 					   strnlen(buf_onecmd_1, sizeof(buf_onecmd_1)),
-					   "PROX_CR_X");
+					   "PROXI_CR_X");
 		sec_cmd_set_cmd_result_all(sec, buf_onecmd_2,
 					   strnlen(buf_onecmd_2, sizeof(buf_onecmd_2)),
-					   "PROX_CR_Y");
+					   "PROXI_CR_Y");
 	}
 
 	sec->cmd_state = SEC_CMD_STATUS_OK;
@@ -2237,9 +2485,9 @@ out:
 
 	if (sec->cmd_all_factory_state == SEC_CMD_STATUS_RUNNING) {
 		sec_cmd_set_cmd_result_all(sec, buf, strnlen(buf, sizeof(buf)),
-					   "PROX_CR_X");
+					   "PROXI_CR_X");
 		sec_cmd_set_cmd_result_all(sec, buf, strnlen(buf, sizeof(buf)),
-					   "PROX_CR_Y");
+					   "PROXI_CR_Y");
 	}
 
 	sec->cmd_state = SEC_CMD_STATUS_FAIL;
@@ -2713,6 +2961,44 @@ void get_cm_all_data(void *dev_data)
 		sec->cmd_state = SEC_CMD_STATUS_FAIL;
 	else
 		sec->cmd_state = SEC_CMD_STATUS_OK;
+}
+
+void run_cm_read_all(void *dev_data)
+{
+	int ret;
+	char buf[16] = { 0 };
+	struct sec_cmd_data *sec = (struct sec_cmd_data *)dev_data;
+	struct ist40xx_data *data = container_of(sec, struct ist40xx_data, sec);
+
+	sec_cmd_set_default_result(sec);
+
+	if (data->status.sys_mode != STATE_POWER_ON) {
+		input_err(true, &data->client->dev,
+			"%s: now sys_mode status is not STATE_POWER_ON!\n",
+			__func__);
+		goto out;
+	}
+
+	ret = ist40xx_get_cmcs_info(ts_cmcs_bin, ts_cmcs_bin_size);
+	if (ret) {
+		input_err(true, &data->client->dev, "%s: get cmcs info read fail!\n",
+			__func__);
+		goto out;
+	}
+
+	ret = get_read_all_data(data, TEST_CM_ALL_DATA);
+	if (ret < 0)
+		sec->cmd_state = SEC_CMD_STATUS_FAIL;
+	else
+		sec->cmd_state = SEC_CMD_STATUS_OK;
+
+	return;
+
+out:
+	snprintf(buf, sizeof(buf), "NG");
+	sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
+
+	sec->cmd_state = SEC_CMD_STATUS_FAIL;
 }
 
 void get_slope0_all_data(void *dev_data)
@@ -3415,7 +3701,7 @@ void check_fail_channel(struct ist40xx_data *data, u32 *tx_result,
 void run_cmcs_full_test(void *dev_data)
 {
 	int ret = 0;
-	bool cm_result, cs_result, gap_result, micro_cm_result;
+	bool cm_result, cs_result, micro_cm_result, old_cmd = 0;
 	char msg[128] = { 0 };
 	char fail_msg[256] = { 0 };
 	char buf[256] = { 0 };
@@ -3427,7 +3713,8 @@ void run_cmcs_full_test(void *dev_data)
 
 	if (data->status.sys_mode != STATE_POWER_ON) {
 		input_err(true, &data->client->dev, "%s: couldn't allocate memory\n",
-			  __func__);
+				__func__);
+		snprintf(buf, sizeof(buf), "NG");
 		goto out;
 	}
 
@@ -3443,56 +3730,49 @@ void run_cmcs_full_test(void *dev_data)
 	}
 
 	if (sec->cmd_param[0] == 1 && sec->cmd_param[1] == 1) {
-	ret = ist40xx_get_cmcs_info(ts_cmcs_bin, ts_cmcs_bin_size);
-	if (ret) {
-		input_err(true, &data->client->dev, "%s: get cmcs info read fail!\n",
-			  __func__);
-		goto out;
-	}
+		ret = ist40xx_get_cmcs_info(ts_cmcs_bin, ts_cmcs_bin_size);
+		if (ret) {
+			input_err(true, &data->client->dev, "%s: get cmcs info read fail!\n",
+				__func__);
+			snprintf(buf, sizeof(buf), "NG");
+			goto out;
+		}
 
-	mutex_lock(&data->lock);
+		mutex_lock(&data->lock);
 
-	ret = ist40xx_cmcs_test(data,
-			CMCS_FLAG_CM | CMCS_FLAG_SLOPE | CMCS_FLAG_CS);
-	if (ret) {
+		ret = ist40xx_cmcs_test(data,
+				CMCS_FLAG_CM | CMCS_FLAG_SLOPE | CMCS_FLAG_CS);
+		if (ret) {
+			mutex_unlock(&data->lock);
+			input_err(true, &data->client->dev, "%s: tsp cmcs test fail!\n",
+				__func__);
+			snprintf(buf, sizeof(buf), "NG");
+			goto out;
+		}
+
 		mutex_unlock(&data->lock);
-		input_err(true, &data->client->dev, "%s: tsp cmcs test fail!\n",
-			  __func__);
-
-		goto out;
-	}
-
-	mutex_unlock(&data->lock);
 	}
 
 	/* CM result */
-	if (cmcs_buf->cm_result == 0) {
-		cm_result = 0;
-		input_err(true, &data->client->dev, "CM result: pass\n");
-	} else {
+	if (cmcs_buf->cm_result == 1) {
 		cm_result = 1;
 		input_err(true, &data->client->dev, "CM result: fail\n");
+	} else {
+		cm_result = 0;
+		input_err(true, &data->client->dev, "CM result: pass\n");
 	}
 
 	/* CS result */
-	if (cmcs_buf->cs_result == 0) {
-		cs_result = 0;
-		input_err(true, &data->client->dev, "CS result: pass\n");
-	} else {
+	if (cmcs_buf->cs_result == 1) {
 		cs_result = 1;
 		input_err(true, &data->client->dev, "CS result: fail\n");
-	}
-
-	if (cmcs_buf->slope_result == 0) {
-		gap_result = 0;
-		input_err(true, &data->client->dev, "GAP result: pass\n");
 	} else {
-		gap_result = 1;
-		input_err(true, &data->client->dev, "GAP result: fail\n");
+		cs_result = 0;
+		input_err(true, &data->client->dev, "CS result: pass\n");
 	}
 
 	/* Micro cm result */
-	if ((cm_result == 1) || (gap_result == 1)) {
+	if ((cmcs_buf->cm_result == 0) && (cmcs_buf->slope_result == 1)) {
 		micro_cm_result = 1;
 		input_err(true, &data->client->dev, "Micro CM result: fail\n");
 	} else {
@@ -3505,43 +3785,49 @@ void run_cmcs_full_test(void *dev_data)
 	if (sec->cmd_param[0] == 1 && sec->cmd_param[1] == 1) {
 		/* 1,1 : open */
 		if (cm_result) {
-			check_fail_channel(data, cmcs_buf->cm_tx_result, cmcs_buf->cm_rx_result,
-					fail_msg);
+			check_fail_channel(data, cmcs_buf->cm_tx_result,
+				cmcs_buf->cm_rx_result, fail_msg);
 			sprintf(msg, "OPEN:%s", fail_msg);
-
+			strcat(buf, msg);
+			goto out;
 		} else {
 			sprintf(msg, "OPEN:OK");
+			strcat(buf, msg);
 		}
-		strcat(buf, msg);
 	} else if (sec->cmd_param[0] == 1 && sec->cmd_param[1] == 2) {
 		/* 1,2 : short */
 		if (cs_result) {
-			check_fail_channel(data, cmcs_buf->cs_tx_result, cmcs_buf->cs_rx_result,
-					fail_msg);
+			check_fail_channel(data, cmcs_buf->cs_tx_result,
+				cmcs_buf->cs_rx_result, fail_msg);
 			sprintf(msg, "SHORT:%s", fail_msg);
+			strcat(buf, msg);
+			goto out;
 		} else {
 			sprintf(msg, "SHORT:OK");
+			strcat(buf, msg);
 		}
-		strcat(buf, msg);
 	} else if (sec->cmd_param[0] == 2) {
 		/* 2 : micro open, crack */
 		if (micro_cm_result) {
-			check_fail_channel(data, cmcs_buf->cm_tx_result, cmcs_buf->cm_rx_result,
-					fail_msg);
+			check_fail_channel(data, cmcs_buf->cm_slope_result,
+				cmcs_buf->cm_slope_result, fail_msg);
 			sprintf(msg, "CRACK:%s", fail_msg);
+			strcat(buf, msg);
+			goto out;
 		} else {
 			sprintf(msg, "CRACK:OK");
+			strcat(buf, msg);
 		}
-		strcat(buf, msg);
 	} else if (sec->cmd_param[0] == 1 && sec->cmd_param[1] == 0) {
 		/* 1,0 : old command, return CONT */
 		sprintf(msg, "CONT");
 		strcat(buf, msg);
 	} else {
 		/* 0 or else : old command */
+		old_cmd = true;
 		if (cm_result) {
-			check_fail_channel(data, cmcs_buf->cm_tx_result, cmcs_buf->cm_rx_result,
-					fail_msg);
+			check_fail_channel(data, cmcs_buf->cm_tx_result,
+				cmcs_buf->cm_rx_result, fail_msg);
 			sprintf(msg, "FAIL%s;", fail_msg);
 		} else {
 			sprintf(msg, "PASS;");
@@ -3550,8 +3836,8 @@ void run_cmcs_full_test(void *dev_data)
 
 		memset(fail_msg, 0, sizeof(fail_msg));
 		if (cs_result) {
-			check_fail_channel(data, cmcs_buf->cs_tx_result, cmcs_buf->cs_rx_result,
-					fail_msg);
+			check_fail_channel(data, cmcs_buf->cs_tx_result,
+				cmcs_buf->cs_rx_result, fail_msg);
 			sprintf(msg, "FAIL%s;", fail_msg);
 		} else {
 			sprintf(msg, "PASS;");
@@ -3559,13 +3845,9 @@ void run_cmcs_full_test(void *dev_data)
 		strcat(buf, msg);
 
 		memset(fail_msg, 0, sizeof(fail_msg));
-		if (cm_result && micro_cm_result) {
-			check_fail_channel(data, cmcs_buf->cm_tx_result, cmcs_buf->cm_rx_result,
-					fail_msg);
-			sprintf(msg, "FAIL%s;", fail_msg);
-		} else if (!cm_result && micro_cm_result) {
+		if (micro_cm_result) {
 			check_fail_channel(data, cmcs_buf->slope_tx_result,
-					cmcs_buf->slope_rx_result, fail_msg);
+				cmcs_buf->slope_rx_result, fail_msg);
 			sprintf(msg, "FAIL;%s", fail_msg);
 		} else {
 			sprintf(msg, "PASS;");
@@ -3593,9 +3875,9 @@ na:
 	}
 
 	input_info(true, &data->client->dev, "%s: %s(%d)\n", __func__, buf,
-		   (int)strnlen(buf, sizeof(buf)));
+			(int)strnlen(buf, sizeof(buf)));
 
-	if (cm_result || cs_result || micro_cm_result)
+	if (old_cmd ||cm_result || cs_result || micro_cm_result)
 		sec_cmd_send_event_to_user(sec, test, "RESULT=FAIL");
 	else
 		sec_cmd_send_event_to_user(sec, test, "RESULT=PASS");
@@ -3603,10 +3885,14 @@ na:
 	return;
 
 out:
-	snprintf(buf, sizeof(buf), "NG");
 	sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
 
 	sec->cmd_state = SEC_CMD_STATUS_FAIL;
+
+	input_info(true, &data->client->dev, "%s: %s(%d)\n", __func__, buf,
+			(int)strnlen(buf, sizeof(buf)));
+
+	sec_cmd_send_event_to_user(sec, test, "RESULT=FAIL");
 }
 
 int ist40xx_execute_force_calibration(struct i2c_client *client, int cal_mode)
@@ -4495,15 +4781,14 @@ static void factory_cmd_result_all(void *dev_data)
 	get_fw_ver_bin(sec);
 	get_fw_ver_ic(sec);
 
-	run_cm_test(sec);
-	get_cm_maxgap_value(sec);
-
-	ist40xx_delay(300);
+	ist40xx_delay(300);		/* need Stabilize time after reset(cal) */
 
 	run_cdc_read(sec);		/*run_reference_read*/
 	run_self_cdc_read(sec);		/*run_self_reference_read*/
-
-	get_wet_mode(sec);
+	run_prox_cdc_read(sec);
+	get_wet_mode(sec);	
+	run_cm_test(sec);
+	get_cm_maxgap_value(sec);
 	run_miscalibration(sec);
 
 	sec->cmd_all_factory_state = SEC_CMD_STATUS_OK;
@@ -4533,10 +4818,12 @@ struct sec_cmd sec_cmds[] = {
 	{SEC_CMD("set_touchable_area", set_touchable_area),},
 	{SEC_CMD("hover_enable", not_support_cmd),},
 	{SEC_CMD("spay_enable", spay_enable),},
+	{SEC_CMD("aot_enable", aot_enable),},
 	{SEC_CMD("aod_enable", aod_enable),},
 	{SEC_CMD("set_aod_rect", set_aod_rect),},
 	{SEC_CMD("get_aod_rect", get_aod_rect),},
 	{SEC_CMD("singletap_enable", singletap_enable),},
+	{SEC_CMD("fod_enable", fod_enable),},
 	{SEC_CMD("get_cp_array", get_cp_array),},
 	{SEC_CMD("get_self_cp_array", get_self_cp_array),},
 	{SEC_CMD("get_prox_cp_array", get_prox_cp_array),},
@@ -4551,7 +4838,9 @@ struct sec_cmd sec_cmds[] = {
 	{SEC_CMD("get_rx_prox_reference", get_rx_prox_cdc_value),},
 	{SEC_CMD("get_tx_prox_reference", get_tx_prox_cdc_value),},
 	{SEC_CMD("run_cdc_read", run_cdc_read),},
+	{SEC_CMD("run_cdc_read_all", run_cdc_read_all),},
 	{SEC_CMD("run_self_cdc_read", run_self_cdc_read),},
+	{SEC_CMD("run_self_cdc_read_all", run_self_cdc_read_all),},
 	{SEC_CMD("run_prox_cdc_read", run_prox_cdc_read),},
 	{SEC_CMD("get_cdc_value", get_cdc_value),},
 	{SEC_CMD("get_self_cdc_value", get_self_cdc_value),},
@@ -4566,6 +4855,7 @@ struct sec_cmd sec_cmds[] = {
 	{SEC_CMD("run_cs_delta_read_all", run_cs_delta_read_all), },
 	{SEC_CMD("get_max_dcm", get_max_dcm), },
 	{SEC_CMD("get_cm_all_data", get_cm_all_data),},
+	{SEC_CMD("run_cm_read_all", run_cm_read_all),},
 	{SEC_CMD("get_slope0_all_data", get_slope0_all_data),},
 	{SEC_CMD("get_slope1_all_data", get_slope1_all_data),},
 	{SEC_CMD("get_cs_all_data", get_cs_all_data),},
@@ -4573,6 +4863,7 @@ struct sec_cmd sec_cmds[] = {
 	{SEC_CMD("get_cm_value", get_cm_value),},
 	{SEC_CMD("get_cm_maxgap_value", get_cm_maxgap_value),},
 	{SEC_CMD("get_cm_maxgap_all", get_cm_maxgap_all),},
+	{SEC_CMD("run_cm_maxgap_read_all", get_cm_maxgap_all),},
 	{SEC_CMD("get_tx_cm_gap_value", get_tx_cm_gap_value),},
 	{SEC_CMD("get_rx_cm_gap_value", get_rx_cm_gap_value),},
 	{SEC_CMD("run_jitter_read", run_cmjit_test),},
@@ -4590,6 +4881,7 @@ struct sec_cmd sec_cmds[] = {
 	{SEC_CMD("run_force_calibration", run_force_calibration),},
 	{SEC_CMD("get_force_calibration", get_force_calibration),},
 	{SEC_CMD("run_mis_cal_read", run_miscalibration),},
+	{SEC_CMD("run_mis_cal_read_all", run_miscalibration_all),},
 	{SEC_CMD("get_mis_cal", get_miscalibration_value),},
 	{SEC_CMD("get_mis_cal_info", get_mis_cal_info), },
 	{SEC_CMD("check_connection", check_connection),},
@@ -5129,9 +5421,806 @@ static struct attribute_group sec_touch_factory_attr_group = {
 	.attrs = sec_touch_factory_attributes,
 };
 
+#if defined(CONFIG_INPUT_SEC_SECURE_TOUCH)
+static ssize_t ist40xx_secure_touch_enable_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct ist40xx_data *data = dev_get_drvdata(dev);
+
+	return scnprintf(buf, PAGE_SIZE, "%d", atomic_read(&data->st_enabled));
+}
+
+/*
+ * Accept only "0" and "1" valid values.
+ * "0" will reset the st_enabled flag, then wake up the reading process.
+ * The bus driver is notified via pm_runtime that it is not required to stay
+ * awake anymore.
+ * It will also make sure the queue of events is emptied in the controller,
+ * in case a touch happened in between the secure touch being disabled and
+ * the local ISR being ungated.
+ * "1" will set the st_enabled flag and clear the st_pending_irqs flag.
+ * The bus driver is requested via pm_runtime to stay awake.
+ */
+static ssize_t ist40xx_secure_touch_enable_store(struct device *dev,
+		struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	struct ist40xx_data *data = dev_get_drvdata(dev);
+	unsigned long value;
+	int err = 0;
+
+	if (count > 2) {
+		input_err(true, &data->client->dev,
+				"%s: cmd length is over (%s,%d)!!\n",
+				__func__, buf, (int)strlen(buf));
+		return -EINVAL;
+	}
+
+	err = kstrtoul(buf, 10, &value);
+	if (err != 0) {
+		input_err(true, &data->client->dev, "%s: failed to read:%d\n",
+				__func__, err);
+		return err;
+	}
+
+	err = count;
+
+	switch (value) {
+	case 0:
+		if (atomic_read(&data->st_enabled) == 0) {
+			input_err(true, &data->client->dev, "%s: secure_touch is not enabled, pending:%d\n",
+					__func__, atomic_read(&data->st_pending_irqs));
+			break;
+		}
+
+		pm_runtime_put_sync(data->client->adapter->dev.parent);
+
+		atomic_set(&data->st_enabled, 0);
+
+		sysfs_notify(&data->input_dev->dev.kobj, NULL, "secure_touch");
+
+		ist40xx_delay(10);
+
+		ist40xx_irq_thread(data->client->irq, data);
+
+		complete(&data->st_powerdown);
+		complete(&data->st_interrupt);
+
+		input_info(true, &data->client->dev, "%s: secure_touch is disabled\n", __func__);
+
+#ifdef IST40XX_NOISE_MODE
+		schedule_delayed_work(&data->work_noise_protect, 0);
+#endif
+#if defined(CONFIG_TRUSTONIC_TRUSTED_UI_QC)
+		complete(&data->st_irq_received);
+#endif
+		break;
+
+	case 1:
+//		if (data->reset_is_on_going) {
+//			input_err(true, &info->client->dev, "%s: reset is on goning becuse i2c fail\n",
+//					__func__);
+//			return -EBUSY;
+//		}
+
+		if (atomic_read(&data->st_enabled)) {
+			input_err(true, &data->client->dev, "%s: secure_touch is already enabled, pending:%d\n",
+					__func__, atomic_read(&data->st_pending_irqs));
+			err = -EBUSY;
+			break;
+		}
+
+#ifdef IST40XX_NOISE_MODE
+		cancel_delayed_work_sync(&data->work_noise_protect);
+#endif
+
+		/* synchronize_irq -> disable_irq + enable_irq
+		 * concern about timing issue.
+		 */
+		ist40xx_disable_irq(data);
+		/* Release All Finger */
+		/*  TODO */
+		if (pm_runtime_get_sync(data->client->adapter->dev.parent) < 0) {
+			input_err(true, &data->client->dev, "%s: pm_runtime_get failed\n", __func__);
+			err = -EIO;
+			ist40xx_enable_irq(data);
+			break;
+		}
+
+		reinit_completion(&data->st_powerdown);
+		reinit_completion(&data->st_interrupt);
+#if defined(CONFIG_TRUSTONIC_TRUSTED_UI_QC)
+		reinit_completion(&data->st_irq_received);
+#endif
+		atomic_set(&data->st_enabled, 1);
+		atomic_set(&data->st_pending_irqs, 0);
+
+		ist40xx_enable_irq(data);
+
+		input_info(true, &data->client->dev, "%s: secure_touch is enabled\n", __func__);
+
+		break;
+
+	default:
+		input_err(true, &data->client->dev, "%s: unsupported value: %lu\n", __func__, value);
+		err = -EINVAL;
+		break;
+	}
+	return err;
+}
+
+#if defined(CONFIG_TRUSTONIC_TRUSTED_UI_QC)
+static int secure_get_irq(struct device *dev)
+{
+	struct ist40xx_data *data = dev_get_drvdata(dev);
+	int val = 0;
+
+	input_err(true, &data->client->dev, "%s: enter\n", __func__);
+	if (atomic_read(&data->st_enabled) == 0) {
+		input_err(true, &data->client->dev, "%s: disabled\n", __func__);
+		return -EBADF;
+	}
+
+	if (atomic_cmpxchg(&data->st_pending_irqs, -1, 0) == -1) {
+		input_err(true, &data->client->dev, "%s: pending irq -1\n", __func__);
+		return -EINVAL;
+	}
+
+	if (atomic_cmpxchg(&data->st_pending_irqs, 1, 0) == 1)
+		val = 1;
+
+	input_err(true, &data->client->dev, "%s: pending irq is %d\n",
+			__func__, atomic_read(&data->st_pending_irqs));
+
+	complete(&data->st_interrupt);
+
+	return val;
+}
+#endif
+
+static ssize_t ist40xx_secure_touch_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct ist40xx_data *data = dev_get_drvdata(dev);
+	int val = 0;
+
+	if (atomic_read(&data->st_enabled) == 0) {
+		input_err(true, &data->client->dev, "%s: secure_touch is not enabled, st_pending_irqs: %d\n",
+				__func__, atomic_read(&data->st_pending_irqs));
+		return -EBADF;
+	}
+
+	if (atomic_cmpxchg(&data->st_pending_irqs, -1, 0) == -1) {
+		input_err(true, &data->client->dev, "%s: st_pending_irqs: %d\n",
+				__func__, atomic_read(&data->st_pending_irqs));
+		return -EINVAL;
+	}
+
+	if (atomic_cmpxchg(&data->st_pending_irqs, 1, 0) == 1) {
+		val = 1;
+		input_info(true, &data->client->dev, "%s: st_pending_irqs: %d, val: %d\n",
+				__func__, atomic_read(&data->st_pending_irqs), val);
+	}
+
+	complete(&data->st_interrupt);
+
+	return scnprintf(buf, PAGE_SIZE, "%u", val);
+}
+
+static void ist40xx_secure_touch_init(struct ist40xx_data *data)
+{
+	init_completion(&data->st_powerdown);
+	init_completion(&data->st_interrupt);
+#if defined(CONFIG_TRUSTONIC_TRUSTED_UI_QC)
+	init_completion(&data->st_irq_received);
+#endif
+#if defined(CONFIG_TRUSTONIC_TRUSTED_UI_QC)
+	register_tui_hal_ts(&data->input_dev->dev, &data->st_enabled,
+			&data->st_irq_received, secure_get_irq,
+			ist40xx_secure_touch_enable_store);
+#endif
+}
+
+void ist40xx_secure_touch_stop(struct ist40xx_data *data, int blocking)
+{
+	if (atomic_read(&data->st_enabled)) {
+		atomic_set(&data->st_pending_irqs, -1);
+		sysfs_notify(&data->input_dev->dev.kobj, NULL, "secure_touch");
+		if (blocking)
+			wait_for_completion_interruptible(&data->st_powerdown);
+	}
+}
+
+irqreturn_t ist40xx_filter_interrupt(struct ist40xx_data *data)
+{
+	if (atomic_read(&data->st_enabled)) {
+		if (atomic_cmpxchg(&data->st_pending_irqs, 0, 1) == 0) {
+			sysfs_notify(&data->input_dev->dev.kobj, NULL, "secure_touch");
+		} else {
+			input_info(true, &data->client->dev, "%s: st_pending_irqs: %d\n",
+					__func__, atomic_read(&data->st_pending_irqs));
+		}
+		return IRQ_HANDLED;
+	}
+	return IRQ_NONE;
+}
+
+static struct device_attribute secure_attrs[] = {
+	__ATTR(secure_touch_enable, (0664),
+			ist40xx_secure_touch_enable_show,
+			ist40xx_secure_touch_enable_store),
+	__ATTR(secure_touch, (0444),
+			ist40xx_secure_touch_show,
+			NULL),
+};
+#endif
+
+int run_debug_for_dump(struct ist40xx_data *data)
+{
+	int ret;
+	int i;
+	u32 addr = IST40XX_DA_ADDR(data->algo_addr);
+	u32 size = data->algo_size;
+	u32 Scancount = 0;
+	u32 *buf32;
+
+	if (!addr) {
+		addr = IST40XX_ALGORITHM_ADDR;
+		size = 1024;
+	}
+
+	input_raw_info(true, &data->client->dev, "----- scancount value -----:\n");
+	ist40xx_read_reg(data->client, IST40XX_HIB_TOUCH_STATUS, &Scancount);
+	input_raw_info(true, &data->client->dev, "ScanCount(0) : %08X\n", Scancount);
+	ist40xx_delay(100);
+	ist40xx_read_reg(data->client, IST40XX_HIB_TOUCH_STATUS, &Scancount);
+	input_raw_info(true, &data->client->dev, "ScanCount(1) : %08X\n", Scancount);
+	ist40xx_delay(100);
+	ist40xx_read_reg(data->client, IST40XX_HIB_TOUCH_STATUS, &Scancount);
+	input_raw_info(true, &data->client->dev, "ScanCount(2) : %08X\n", Scancount);
+
+	data->status.event_mode = false;
+	ist40xx_cmd_hold(data, IST40XX_ENABLE);
+	buf32 = kzalloc(size * sizeof(u32), GFP_KERNEL);
+	ret = ist40xx_burst_read(data->client, addr, buf32, size, true);
+	if (ret) {
+		data->status.event_mode = true;
+		ist40xx_reset(data, false);
+		ist40xx_start(data);
+		kfree(buf32);
+		return ret;
+	}
+	ist40xx_cmd_hold(data, IST40XX_DISABLE);
+
+	input_raw_info(true, &data->client->dev, "----- debug value -----:\n");
+	for (i = 0; i < (size / IST40XX_DATA_LEN); i++)
+		input_raw_info(true, &data->client->dev, "%08X %08X %08X %08X\n", buf32[i * 4], buf32[i * 4 + 1],
+					buf32[i * 4 + 2], buf32[i * 4 + 3]);
+
+	data->status.event_mode = true;
+	kfree(buf32);
+
+	return 0;
+}
+
+int run_cp_for_dump(struct ist40xx_data *data)
+{
+	int ret;
+	TSP_INFO *tsp = &data->tsp_info;
+
+	mutex_lock(&data->lock);
+	ret = ist40xx_read_cp_node(data, &tsp->node, false);
+	if (ret) {
+		mutex_unlock(&data->lock);
+		tsp_err("MemX cp read fail\n");
+		return ret;
+	}
+
+	ist40xx_parse_cp_node(data, &tsp->node, false);
+
+	ret = ist40xx_read_cp_node(data, &tsp->node, true);
+	if (ret) {
+		mutex_unlock(&data->lock);
+		tsp_err("Info cp read fail\n");
+		return ret;
+	}
+	mutex_unlock(&data->lock);
+
+	ist40xx_parse_cp_node(data, &tsp->node, true);
+
+	return 0;
+}
+
+void dump_self_prox_log(struct ist40xx_data *data, int type)
+{
+	int ii, jj;
+	int val = 0;
+	const int msg_len = 128;
+	char msg[msg_len];
+	char *buf = NULL;
+	TSP_INFO *tsp = &data->tsp_info;
+	struct TSP_NODE_BUF *node = &tsp->node;
+
+	buf = kzalloc(2048, GFP_KERNEL);
+	if (buf == NULL)
+	return;
+	buf[0] = '\0';
+
+	if (tsp->dir.swap_xy) {
+		for (ii = tsp->ch_num.rx - 1; ii >= 0; ii--) {
+			for (jj = tsp->ch_num.tx - 1; jj >= 0; jj--) {
+				if (type == LOG_MEMX_CP)
+					val = node->memx_cp[jj * tsp->ch_num.rx + ii];
+				else if (type == LOG_ROM_CP)
+					val = node->rom_cp[jj * tsp->ch_num.rx + ii];
+				else if (type == LOG_CDC)
+					val = node->cdc[jj * tsp->ch_num.rx + ii];
+				else if (type == LOG_BASE)
+					val = node->base[jj * tsp->ch_num.rx + ii];
+				snprintf(msg, msg_len, "%4d ", val);
+				strncat(buf, msg, msg_len);
+				if (jj == 0) {
+					if (type == LOG_MEMX_CP)
+						val = node->memx_self_cp[tsp->ch_num.tx + ii];
+					else if (type == LOG_ROM_CP)
+						val = node->rom_self_cp[tsp->ch_num.tx + ii];
+					else if (type == LOG_CDC)
+						val = node->self_cdc[tsp->ch_num.tx + ii];
+					else if (type == LOG_BASE)
+						val = node->self_base[tsp->ch_num.tx + ii];
+					snprintf(msg, msg_len, "     %4d ", val);
+					strncat(buf, msg, msg_len);
+					if (type == LOG_MEMX_CP)
+						val = node->memx_prox_cp[tsp->ch_num.tx + ii];
+					else if (type == LOG_ROM_CP)
+						val = node->rom_prox_cp[tsp->ch_num.tx + ii];
+					else if (type == LOG_CDC)
+						val = node->prox_cdc[tsp->ch_num.tx + ii];
+					else if (type == LOG_BASE)
+						val = node->prox_base[tsp->ch_num.tx + ii];
+					snprintf(msg, msg_len, "%4d ", val);
+					strncat(buf, msg, msg_len);
+					snprintf(msg, msg_len, " | Rx%02d", ii);
+					strncat(buf, msg, msg_len);
+				}
+			}
+			input_raw_info(true, &data->client->dev, "%s\n", buf);
+
+			if (ii == 0) {
+				input_raw_info(true, &data->client->dev, "\n");
+				buf[0] = '\0';
+				for (jj = tsp->ch_num.tx - 1; jj >= 0; jj--) {
+					if (type == LOG_MEMX_CP)
+						val = node->memx_self_cp[jj];
+					else if (type == LOG_ROM_CP)
+						val = node->rom_self_cp[jj];
+					else if (type == LOG_CDC)
+						val = node->self_cdc[jj];
+					else if (type == LOG_BASE)
+						val = node->self_base[jj];
+					snprintf(msg, msg_len, "%4d ", val);
+					strncat(buf, msg, msg_len);
+				}
+				input_raw_info(true, &data->client->dev, "%s\n", buf);
+
+				buf[0] = '\0';
+				for (jj = tsp->ch_num.tx - 1; jj >= 0; jj--) {
+					if (type == LOG_MEMX_CP)
+						val = node->memx_prox_cp[jj];
+					else if (type == LOG_ROM_CP)
+						val = node->rom_prox_cp[jj];
+					else if (type == LOG_CDC)
+						val = node->prox_cdc[jj];
+					else if (type == LOG_BASE)
+						val = node->prox_base[jj];
+					snprintf(msg, msg_len, "%4d ", val);
+					strncat(buf, msg, msg_len);
+				}
+				input_raw_info(true, &data->client->dev, "%s\n", buf);
+
+				buf[0] = '\0';
+				for (jj = tsp->ch_num.tx + 2; jj >= 0; jj--) {
+					snprintf(msg, msg_len, "-----");
+					strncat(buf, msg, msg_len);
+				}
+				input_raw_info(true, &data->client->dev, "%s\n", buf);
+
+				buf[0] = '\0';
+				for (jj = tsp->ch_num.tx - 1; jj >= 0 ; jj--) {
+					snprintf(msg, msg_len, "  %02d ", jj);
+					strncat(buf, msg, msg_len);
+				}
+				snprintf(msg, msg_len, "                | Tx");
+				strncat(buf, msg, msg_len);
+				input_raw_info(true, &data->client->dev, "%s\n", buf);
+			}
+			buf[0] = '\0';
+		}
+	} else {
+		for (ii = tsp->ch_num.tx - 1; ii >= 0; ii--) {
+			for (jj = tsp->ch_num.rx - 1; jj >= 0; jj--) {
+				if (type == LOG_MEMX_CP)
+					val = node->memx_cp[ii * tsp->ch_num.rx + ii];
+				else if (type == LOG_ROM_CP)
+					val = node->rom_cp[ii * tsp->ch_num.rx + jj];
+				else if (type == LOG_CDC)
+					val = node->cdc[ii * tsp->ch_num.rx + jj];
+				else if (type == LOG_BASE)
+					val = node->base[ii * tsp->ch_num.rx + jj];
+				snprintf(msg, msg_len, "%4d ", val);
+				strncat(buf, msg, msg_len);
+				if (jj == 0) {
+					if (type == LOG_MEMX_CP)
+						val = node->memx_self_cp[ii];
+					else if (type == LOG_ROM_CP)
+						val = node->rom_self_cp[ii];
+					else if (type == LOG_CDC)
+						val = node->self_cdc[ii];
+					else if (type == LOG_BASE)
+						val = node->self_base[ii];
+					snprintf(msg, msg_len, "     %4d ", val);
+					strncat(buf, msg, msg_len);
+					if (type == LOG_MEMX_CP)
+						val = node->memx_prox_cp[ii];
+					else if (type == LOG_ROM_CP)
+						val = node->rom_prox_cp[ii];
+					else if (type == LOG_CDC)
+						val = node->prox_cdc[ii];
+					else if (type == LOG_BASE)
+						val = node->prox_base[ii];
+					snprintf(msg, msg_len, "%4d ", val);
+					strncat(buf, msg, msg_len);
+
+					snprintf(msg, msg_len, " | Tx%02d", ii);
+					strncat(buf, msg, msg_len);
+				}
+			}
+			input_raw_info(true, &data->client->dev, "%s\n", buf);
+
+			if (ii == 0) {
+			input_raw_info(true, &data->client->dev, "\n");
+			buf[0] = '\0';
+			for (jj = tsp->ch_num.rx - 1; jj >= 0; jj--) {
+				if (type == LOG_MEMX_CP)
+					val = node->memx_self_cp[tsp->ch_num.tx + jj];
+				else if (type == LOG_ROM_CP)
+					val = node->rom_self_cp[tsp->ch_num.tx + jj];
+				else if (type == LOG_CDC)
+					val = node->self_cdc[tsp->ch_num.tx + jj];
+				else if (type == LOG_BASE)
+					val = node->self_base[jj];
+				snprintf(msg, msg_len, "%4d ", val);
+				strncat(buf, msg, msg_len);
+			}
+			input_raw_info(true, &data->client->dev, "%s\n", buf);
+
+			buf[0] = '\0';
+			for (jj = tsp->ch_num.rx - 1; jj >= 0; jj--) {
+				if (type == LOG_MEMX_CP)
+					val = node->memx_prox_cp[tsp->ch_num.tx + jj];
+				else if (type == LOG_ROM_CP)
+					val = node->rom_prox_cp[tsp->ch_num.tx + jj];
+				else if (type == LOG_CDC)
+					val = node->prox_cdc[tsp->ch_num.tx + jj];
+				else if (type == LOG_BASE)
+					val = node->prox_base[jj];
+				snprintf(msg, msg_len, "%4d ", val);
+				strncat(buf, msg, msg_len);
+			}
+			input_raw_info(true, &data->client->dev, "%s\n", buf);
+
+			buf[0] = '\0';
+			for (jj = tsp->ch_num.rx + 2; jj >= 0; jj--) {
+				snprintf(msg, msg_len, "-----");
+				strncat(buf, msg, msg_len);
+			}
+			input_raw_info(true, &data->client->dev, "%s\n", buf);
+
+			buf[0] = '\0';
+			for (jj = tsp->ch_num.rx - 1; jj >= 0 ; jj--) {
+				snprintf(msg, msg_len, "  %02d ", jj);
+				strncat(buf, msg, msg_len);
+			}
+			snprintf(msg, msg_len, "                | Rx");
+			strncat(buf, msg, msg_len);
+			input_raw_info(true, &data->client->dev, "%s\n", buf);
+			}
+			buf[0] = '\0';
+		}
+	}
+	kfree(buf);
+}
+
+void dump_log(struct ist40xx_data *data, int type)
+{
+	int ii, jj;
+	int val = 0;
+	const int msg_len = 128;
+	char msg[msg_len];
+	char *buf = NULL;
+	TSP_INFO *tsp = &data->tsp_info;
+	struct TSP_NODE_BUF *node = &tsp->node;
+
+	buf = kzalloc(2048, GFP_KERNEL);
+	if (buf == NULL)
+	return;
+	buf[0] = '\0';
+
+	if (tsp->dir.swap_xy) {
+		for (ii = tsp->ch_num.rx - 1; ii >= 0; ii--) {
+			for (jj = tsp->ch_num.tx - 1; jj >= 0; jj--) {
+				if (type == LOG_LOFS)
+					val = node->lofs[jj * tsp->ch_num.rx + ii];
+				else if (type == LOG_CM)
+					val = cmcs_buf->cm[jj * tsp->ch_num.rx + ii];
+				else if (type == LOG_GAP)
+					val = cmcs_buf->slope[jj * tsp->ch_num.rx + ii];
+				else if (type == LOG_CS)
+					val = cmcs_buf->cs[jj * tsp->ch_num.rx + ii];
+				else if (type == LOG_MISCAL)
+					val = node->miscal[jj * tsp->ch_num.rx + ii];
+				snprintf(msg, msg_len, "%4d ", val);
+				strncat(buf, msg, msg_len);
+				if (jj == 0) {
+					snprintf(msg, msg_len, " | Rx%02d", ii);
+					strncat(buf, msg, msg_len);
+				}
+			}
+			input_raw_info(true, &data->client->dev, "%s\n", buf);
+			if (ii == 0) {
+				buf[0] = '\0';
+				for (jj = tsp->ch_num.tx - 1; jj >= 0; jj--) {
+					snprintf(msg, msg_len, "-----");
+					strncat(buf, msg, msg_len);
+				}
+				input_raw_info(true, &data->client->dev, "%s\n", buf);
+
+				buf[0] = '\0';
+				for (jj = tsp->ch_num.tx - 1; jj >= 0 ; jj--) {
+					snprintf(msg, msg_len, "  %02d ", jj);
+					strncat(buf, msg, msg_len);
+				}
+				snprintf(msg, msg_len, " | Tx");
+				strncat(buf, msg, msg_len);
+				input_raw_info(true, &data->client->dev, "%s\n", buf);
+			}
+			buf[0] = '\0';
+		}
+	} else {
+		for (ii = tsp->ch_num.tx - 1; ii >= 0; ii--) {
+			for (jj = tsp->ch_num.rx - 1; jj >= 0; jj--) {
+				if (type == LOG_LOFS)
+					val = node->lofs[ii * tsp->ch_num.rx + jj];
+				else if (type == LOG_CM)
+					val = cmcs_buf->cm[ii * tsp->ch_num.rx + jj];
+				else if (type == LOG_GAP)
+					val = cmcs_buf->slope[ii * tsp->ch_num.rx + jj];
+				else if (type == LOG_CS)
+					val = cmcs_buf->cs[ii * tsp->ch_num.rx + jj];
+				else if (type == LOG_MISCAL)
+					val = node->miscal[ii * tsp->ch_num.rx + jj];
+				snprintf(msg, msg_len, "%4d ", val);
+				strncat(buf, msg, msg_len);
+				if (jj == 0) {
+					snprintf(msg, msg_len, " | Tx%02d", ii);
+					strncat(buf, msg, msg_len);
+				}
+			}
+			input_raw_info(true, &data->client->dev, "%s\n", buf);
+			if (ii == 0) {
+				buf[0] = '\0';
+				for (jj = tsp->ch_num.rx - 1; jj >= 0; jj--) {
+					snprintf(msg, msg_len, "-----");
+					strncat(buf, msg, msg_len);
+				}
+				input_raw_info(true, &data->client->dev, "%s\n", buf);
+
+				buf[0] = '\0';
+				for (jj = tsp->ch_num.rx - 1; jj >= 0 ; jj--) {
+					snprintf(msg, msg_len, "  %02d ", jj);
+					strncat(buf, msg, msg_len);
+				}
+				snprintf(msg, msg_len, " | Rx");
+				strncat(buf, msg, msg_len);
+				input_raw_info(true, &data->client->dev, "%s\n", buf);
+			}
+			buf[0] = '\0';
+		}
+	}
+
+	kfree(buf);
+}
+
+int run_node_for_dump(struct ist40xx_data *data)
+{
+	int ret;
+	int pre_mode = 0;
+	u8 flag = NODE_FLAG_CDC | NODE_FLAG_BASE | NODE_FLAG_LOFS;
+	TSP_INFO *tsp = &data->tsp_info;
+
+	pre_mode = (data->noise_mode >> NOISE_MODE_CALL) & 1;
+	ist40xx_set_call_mode(1);
+	ist40xx_delay(300);
+
+	mutex_lock(&data->lock);
+	ret = ist40xx_read_touch_node(data, flag, &tsp->node);
+	if (ret) {
+		mutex_unlock(&data->lock);
+		ist40xx_set_call_mode(pre_mode);
+		tsp_err("node frame read fail\n");
+		return ret;
+	}
+	mutex_unlock(&data->lock);
+	ist40xx_set_call_mode(pre_mode);
+
+	ist40xx_parse_touch_node(data, &tsp->node);
+
+	return 0;
+}
+
+void dump_node_log(struct ist40xx_data *data)
+{
+	input_raw_info(true, &data->client->dev, "----- cdc value -----:\n");
+	dump_self_prox_log(data, LOG_CDC);
+
+	input_raw_info(true, &data->client->dev, "----- base value -----:\n");
+	dump_self_prox_log(data, LOG_BASE);
+
+	input_raw_info(true, &data->client->dev, "----- lofs value -----:\n");
+	dump_log(data, LOG_LOFS);
+}
+
+int run_cmcs_for_dump(struct ist40xx_data *data)
+{
+	int ret;
+
+	ret = ist40xx_get_cmcs_info(ts_cmcs_bin, ts_cmcs_bin_size);
+	if (ret) {
+		tsp_err("%s() get cmcs info read fail!\n", __func__);
+		return ret;
+	}
+
+	mutex_lock(&data->lock);
+	ret = ist40xx_cmcs_test(data,
+				CMCS_FLAG_CM | CMCS_FLAG_SLOPE | CMCS_FLAG_CS);
+	if (ret) {
+		mutex_unlock(&data->lock);
+		tsp_err( "%s() cmcs test fail!\n", __func__);
+		return ret;
+	}
+	mutex_unlock(&data->lock);
+
+	return 0;
+}
+
+void dump_cmcs_log(struct ist40xx_data *data)
+{
+	bool cm_result, cs_result, gap_result;
+	
+	input_raw_info(true, &data->client->dev, "----- cm value -----:\n");
+	dump_log(data, LOG_CM);
+
+	if (cmcs_buf->cm_result == 0) {
+		cm_result = 0;
+		input_raw_info(true, &data->client->dev,  "### CM result: pass ###\n");
+	} else {
+		cm_result = 1;
+		input_raw_info(true, &data->client->dev, "### CM result: fail ###\n");
+	}
+
+	input_raw_info(true, &data->client->dev, "----- gap value -----:\n");
+	dump_log(data, LOG_GAP);
+		
+	if (cmcs_buf->slope_result == 0) {
+		gap_result = 0;
+		tsp_err( "### GAP result: pass ###\n");
+	} else {
+		gap_result = 1;
+		tsp_err( "### GAP result: fail ###\n");
+	}
+
+	input_raw_info(true, &data->client->dev, "----- cs value -----:\n");
+	dump_log(data, LOG_CS);
+
+	/* CS result */
+	if (cmcs_buf->cs_result == 0) {
+		cs_result = 0;
+		input_raw_info(true, &data->client->dev, "### CS result: pass ###\n");
+	} else {
+		cs_result = 1;
+		input_raw_info(true, &data->client->dev, "### CS result: fail ###\n");
+	}
+}
+
+void dump_miscal_log(struct ist40xx_data *data)
+{
+	dump_log(data, LOG_MISCAL);
+	/*for max miscal_value */
+	input_raw_info(true, &data->client->dev, "### miscal_value - Max: %d ###\n", data->status.miscalib_result);
+
+}
+
+void ist40xx_display_booting_dump_log(struct ist40xx_data *data)
+{
+	int ret;
+
+	input_raw_info(true, &data->client->dev, "*** TSP Dump CMCS Value ***\n");
+	ret = run_cmcs_for_dump(data);
+	if (ret) {
+		input_raw_info(true, &data->client->dev, "TSP Dump CMCS FAILED\n");
+		return;
+	}
+	dump_cmcs_log(data);
+
+	ret = ist40xx_miscalibrate(data);
+	if (ret) {
+		input_raw_info(true, &data->client->dev, "TSP Dump Miscal FAILED\n");
+		return;
+	}
+	input_raw_info(true, &data->client->dev, "*** TSP Dump Miscal Value ***\n");
+	dump_miscal_log(data);
+}
+
+void ist40xx_display_key_dump_log(struct ist40xx_data *data)
+{
+	int ret;
+
+	ret = run_debug_for_dump(data);
+	if (ret) {
+		input_raw_info(true, &data->client->dev, "TSP Dump Debug FAILED\n");
+		return;
+	}
+
+	ret = run_node_for_dump(data);
+	if (ret) {
+		input_raw_info(true, &data->client->dev, "TSP Dump Node FAILED\n");
+		return;
+	}
+
+	input_raw_info(true, &data->client->dev, "----- cdc value -----:\n");
+	dump_self_prox_log(data, LOG_CDC);
+
+	input_raw_info(true, &data->client->dev, "----- base value -----:\n");
+	dump_self_prox_log(data, LOG_BASE);
+	
+	input_raw_info(true, &data->client->dev, "----- lofs value -----:\n");
+	dump_log(data, LOG_LOFS);
+
+	ret = run_cp_for_dump(data);
+	if (ret) {
+		input_raw_info(true, &data->client->dev, "TSP Dump CP FAILED\n");
+		return;
+	}
+
+	input_raw_info(true, &data->client->dev, "----- MemX cp value -----:\n");
+	dump_self_prox_log(data, LOG_MEMX_CP);
+
+	input_raw_info(true, &data->client->dev, "----- Info cp value -----:\n");
+	dump_self_prox_log(data, LOG_ROM_CP);
+
+	ret = run_cmcs_for_dump(data);
+	if (ret) {
+		input_raw_info(true, &data->client->dev, "TSP Dump CMCS FAILED\n");
+		return;
+	}
+	dump_cmcs_log(data);
+
+	ret = ist40xx_miscalibrate(data);
+	if (ret) {
+		input_raw_info(true, &data->client->dev, "TSP Dump Miscal FAILED\n");
+		return;
+	}
+	input_raw_info(true, &data->client->dev, "*** TSP Dump Miscal Value ***\n");
+	dump_miscal_log(data);
+
+}
+
 int sec_touch_sysfs(struct ist40xx_data *data)
 {
 	int ret;
+#if defined(CONFIG_INPUT_SEC_SECURE_TOUCH)
+	int i;
+#endif
 
 	/* /sys/class/sec/tsp */
 	ret = sec_cmd_init(&data->sec, sec_cmds,
@@ -5158,6 +6247,19 @@ int sec_touch_sysfs(struct ist40xx_data *data)
 		goto err_sec_fac_dev_attr;
 	}
 
+#if defined(CONFIG_INPUT_SEC_SECURE_TOUCH)
+	for (i = 0; i < (int)ARRAY_SIZE(secure_attrs); i++) {
+		ret = sysfs_create_file(&data->input_dev->dev.kobj,
+				&secure_attrs[i].attr);
+		if (ret < 0) {
+			input_err(true, &data->client->dev,
+					"%s: Failed to create sysfs attributes\n",
+					__func__);
+		}
+	}
+
+	ist40xx_secure_touch_init(data);
+#endif
 	return 0;
 
 err_sec_fac_dev_attr:
@@ -5172,6 +6274,13 @@ EXPORT_SYMBOL(sec_touch_sysfs);
 
 void sec_touch_sysfs_remove(struct ist40xx_data *data)
 {
+#if defined(CONFIG_INPUT_SEC_SECURE_TOUCH)
+	int i;
+
+	for (i = 0; i < (int)ARRAY_SIZE(secure_attrs); i++)
+		sysfs_remove_file(&data->input_dev->dev.kobj, &secure_attrs[i].attr);
+#endif
+
 	sysfs_remove_group(&data->sec.fac_dev->kobj, &sec_touch_factory_attr_group);
 	sysfs_remove_link(&data->sec.fac_dev->kobj, "input");
 	sec_cmd_exit(&data->sec, SEC_CLASS_DEVT_TSP);

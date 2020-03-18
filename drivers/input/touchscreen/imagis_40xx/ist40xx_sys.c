@@ -26,11 +26,6 @@
 #include <linux/trustedui.h>
 #endif
 
-#ifdef CONFIG_INPUT_SEC_SECURE_TOUCH
-#define SECURE_TOUCH_ENABLED	1
-#define SECURE_TOUCH_DISABLED	0
-#endif
-
 /******************************************************************************
  * Return value of Error
  * EPERM  : 1 (Operation not permitted)
@@ -40,12 +35,14 @@
  * EINVAL : 22 (Invalid argument)
  *****************************************************************************/
 int ist40xx_write_sponge_reg(struct ist40xx_data *data, u16 idx, u16 *buf16,
-		int len)
+		int len, bool hold)
 {
 	int i;
 	int ret = -EIO;
 
-	ist40xx_cmd_hold(data, IST40XX_ENABLE);
+	if (hold)
+		ist40xx_cmd_hold(data, IST40XX_ENABLE);
+
 	data->ignore_delay = true;
 
 	for (i = 0; i < len; i++) {
@@ -71,19 +68,25 @@ int ist40xx_write_sponge_reg(struct ist40xx_data *data, u16 idx, u16 *buf16,
 err_write_sponge_reg:
 
 	data->ignore_delay = false;
-	ist40xx_cmd_hold(data, IST40XX_DISABLE);
+
+	if (hold)
+		ist40xx_cmd_hold(data, IST40XX_DISABLE);
+
+	ist40xx_delay(1);
 
 	return ret;
 }
 
 int ist40xx_read_sponge_reg(struct ist40xx_data *data, u16 idx, u16 *buf16,
-		int len)
+		int len, bool hold)
 {
 	int i;
 	int ret = -EIO;
 	u32 rdata = 0;
 
-	ist40xx_cmd_hold(data, IST40XX_ENABLE);
+	if (hold)
+		ist40xx_cmd_hold(data, IST40XX_ENABLE);
+
 	data->ignore_delay = true;
 
 	for (i = 0; i < len; i++) {
@@ -111,7 +114,11 @@ int ist40xx_read_sponge_reg(struct ist40xx_data *data, u16 idx, u16 *buf16,
 err_read_sponge_reg:
 
 	data->ignore_delay = false;
-	ist40xx_cmd_hold(data, IST40XX_DISABLE);
+
+	if (hold)
+		ist40xx_cmd_hold(data, IST40XX_DISABLE);
+
+	ist40xx_delay(1);
 
 	return ret;
 }
@@ -121,27 +128,32 @@ int ist40xx_cmd_gesture(struct ist40xx_data *data, u16 value)
 	int ret = -EIO;
 	struct timeval utc_time;
 
+	ret = ist40xx_write_cmd(data, IST40XX_HIB_INTR_MSG, IST40XX_LPM_VALUE);
+	if (ret)
+		input_err(true, &data->client->dev, "fail to write LPM TAG value.\n");
+
 	if (value == IST40XX_ENABLE) {
 		input_info(true, &data->client->dev, "%s\n", __func__);
+
+		ist40xx_set_halfaod_mode(data->prox_power_off);
 
 		do_gettimeofday(&utc_time);
 
 		input_info(true, &data->client->dev, "Write UTC to Sponge = %X\n",
 			   (int)utc_time.tv_sec);
 
+		ist40xx_cmd_hold(data, IST40XX_ENABLE);
 		ist40xx_write_sponge_reg(data, IST40XX_SPONGE_UTC,
-				(u16 *)&utc_time.tv_sec, 2);
-		ist40xx_write_cmd(data, IST40XX_HIB_CMD,
-				(eHCOM_NOTIRY_G_REGMAP << 16) | IST40XX_ENABLE);
-		ist40xx_write_sponge_reg(data, IST40XX_SPONGE_RECT, data->rect_data, 4);
-		ist40xx_write_cmd(data, IST40XX_HIB_CMD,
-				(eHCOM_NOTIRY_G_REGMAP << 16) | IST40XX_ENABLE);
+				(u16 *)&utc_time.tv_sec, 2, false);
+		ist40xx_write_sponge_reg(data, IST40XX_SPONGE_RECT, data->rect_data,
+				4, false);
 
-		ret = ist40xx_write_cmd(data, IST40XX_HIB_INTR_MSG, IST40XX_LPM_VALUE);
-		if (ret)
-			input_err(true, &data->client->dev, "fail to write LPM magic value.\n");
+		data->ignore_delay = true;
+ 		ist40xx_write_cmd(data, IST40XX_HIB_CMD,
+ 				(eHCOM_NOTIRY_G_REGMAP << 16) | IST40XX_ENABLE);
+		data->ignore_delay = false;
 
-		input_info(true, &data->client->dev, "LPM Magic\n");
+		ist40xx_cmd_hold(data, IST40XX_DISABLE);
 	}
 
 	ret = ist40xx_write_cmd(data, IST40XX_HIB_CMD,
@@ -151,10 +163,11 @@ int ist40xx_cmd_gesture(struct ist40xx_data *data, u16 value)
 	} else {
 		if (value == IST40XX_ENABLE) {
 			input_info(true, &data->client->dev,
-				   "%s: spay : %d, aod : %d, singletap : %d\n", __func__,
+				"%s: spay : %d, aod : %d, singletap : %d, aot : %d\n", __func__,
 				   (data->lpm_mode & IST40XX_SPAY) ? 1 : 0,
 				   (data->lpm_mode & IST40XX_AOD) ? 1 : 0,
-				   (data->lpm_mode & IST40XX_SINGLETAP) ? 1 : 0);
+				(data->lpm_mode & IST40XX_SINGLETAP) ? 1 : 0,
+				(data->lpm_mode & IST40XX_DOUBLETAP_WAKEUP) ? 1 : 0);
 		} else {
 			input_err(true, &data->client->dev, "%s: normal mode\n",
 				  __func__);
@@ -223,7 +236,7 @@ int ist40xx_i2c_transfer(struct i2c_client *client, struct i2c_msg *msgs,
 #ifdef CONFIG_INPUT_SEC_SECURE_TOUCH
 	struct ist40xx_data *data = i2c_get_clientdata(client);
 
-	if (atomic_read(&data->secure_enabled) == SECURE_TOUCH_ENABLED) {
+	if (atomic_read(&data->st_enabled) == SECURE_TOUCH_ENABLED) {
 		input_err(true, &client->dev,
 			  "%s: TSP no accessible from Linux, TUI is enabled!\n",
 			  __func__);
@@ -274,6 +287,27 @@ int ist40xx_i2c_transfer(struct i2c_client *client, struct i2c_msg *msgs,
 			break;
 		}
 
+/*
+		{
+			int i;
+
+			pr_info("sec_input: I2C: %s\n", __func__);
+			pr_info("sec_input: I2C: W: ");
+			for (i = 0; i < msgs[0].len; i++) {
+				pr_cont("%02X ", msgs[0].buf[i]);
+			}
+			pr_cont("\n");
+
+			if (msg_num > 1) {
+				pr_info("sec_input: I2C: R: ");
+				for (i = 0; i < msgs[1].len; i++) {
+					pr_cont("%02X ", msgs[1].buf[i]);
+
+				}
+				pr_cont("\n");
+			}
+		}
+*/
 		if (msg_num == WRITE_CMD_MSG_LEN)
 			pbuf += trans_size;
 		else
@@ -294,13 +328,14 @@ int ist40xx_read_buf(struct i2c_client *client, u32 cmd, u32 *buf, u16 len)
 	int ret, i;
 	u32 le_reg = cpu_to_be32(cmd);
 	u32 *msg_buf = NULL;
+	u8 *t_u8_reg;
 
 	struct i2c_msg msg[READ_CMD_MSG_LEN] = {
 		{
 			.addr = client->addr,
 			.flags = 0,
 			.len = IST40XX_ADDR_LEN,
-			.buf = (u8 *)&le_reg,
+//			.buf = (u8 *)&le_reg,
 		},
 		{
 			.addr = client->addr,
@@ -309,9 +344,21 @@ int ist40xx_read_buf(struct i2c_client *client, u32 cmd, u32 *buf, u16 len)
 		},
 	};
 
+	t_u8_reg = kzalloc(4, GFP_KERNEL);
+	if (!t_u8_reg)
+		return -ENOMEM;
+
+	t_u8_reg[3] = (u8)((le_reg >> 24) & 0xFF);
+	t_u8_reg[2] = (u8)((le_reg >> 16) & 0xFF);
+	t_u8_reg[1] = (u8)((le_reg >> 8) & 0xFF);
+	t_u8_reg[0] = (u8)(le_reg & 0xFF);
+
+	msg[0].buf = t_u8_reg;
+
 	if (data->status.sys_mode == STATE_POWER_OFF) {
 		input_err(true, &client->dev,
 			  "%s: now sys_mode status is STATE_POWER_OFF!\n", __func__);
+		kfree(t_u8_reg);
 		return -ENODEV;
 	}
 
@@ -325,6 +372,7 @@ int ist40xx_read_buf(struct i2c_client *client, u32 cmd, u32 *buf, u16 len)
 	if (ret != READ_CMD_MSG_LEN) {
 		data->comm_err_count++;
 		kfree(msg_buf);
+		kfree(t_u8_reg);
 		mutex_unlock(&data->i2c_lock);
 		return -EIO;
 	}
@@ -334,7 +382,7 @@ int ist40xx_read_buf(struct i2c_client *client, u32 cmd, u32 *buf, u16 len)
 
 	memcpy(buf, msg_buf, len * IST40XX_DATA_LEN);
 	kfree(msg_buf);
-
+	kfree(t_u8_reg);
 	mutex_unlock(&data->i2c_lock);
 
 	return 0;
@@ -400,13 +448,14 @@ int ist40xx_read_reg(struct i2c_client *client, u32 reg, u32 *buf)
 	int ret;
 	u32 le_reg = cpu_to_be32(reg);
 	u32 *msg_buf = NULL;
+	u8 *t_u8_reg;
 
 	struct i2c_msg msg[READ_CMD_MSG_LEN] = {
 		{
 			.addr = client->addr,
 			.flags = 0,
 			.len = IST40XX_ADDR_LEN,
-			.buf = (u8 *)&le_reg,
+//			.buf = (u8 *)&le_reg,
 		},
 		{
 			.addr = client->addr,
@@ -415,17 +464,30 @@ int ist40xx_read_reg(struct i2c_client *client, u32 reg, u32 *buf)
 		},
 	};
 
+	t_u8_reg = kzalloc(4, GFP_KERNEL);
+	if (!t_u8_reg)
+		return -ENOMEM;
+
+	t_u8_reg[3] = (u8)((le_reg >> 24) & 0xFF);
+	t_u8_reg[2] = (u8)((le_reg >> 16) & 0xFF);
+	t_u8_reg[1] = (u8)((le_reg >> 8) & 0xFF);
+	t_u8_reg[0] = (u8)(le_reg & 0xFF);
+
+	msg[0].buf = t_u8_reg;
+	
 	if (data->status.sys_mode == STATE_POWER_OFF) {
 		input_err(true, &client->dev,
 			  "%s: now sys_mode status is STATE_POWER_OFF!\n", __func__);
+		kfree(t_u8_reg);
 		return -ENODEV;
 	}
 
 #ifdef CONFIG_INPUT_SEC_SECURE_TOUCH
-	if (atomic_read(&data->secure_enabled) == SECURE_TOUCH_ENABLED) {
+	if (atomic_read(&data->st_enabled) == SECURE_TOUCH_ENABLED) {
 		input_err(true, &client->dev,
 			  "%s: TSP no accessible from Linux, TUI is enabled!\n",
 			  __func__);
+		kfree(t_u8_reg);
 		return -EBUSY;
 	}
 #endif
@@ -434,6 +496,7 @@ int ist40xx_read_reg(struct i2c_client *client, u32 reg, u32 *buf)
 		input_err(true, &client->dev,
 			  "%s: TSP no accessible from Linux, TUI is enabled!\n",
 			  __func__);
+		kfree(t_u8_reg);
 		return -EIO;
 	}
 #endif
@@ -452,12 +515,33 @@ int ist40xx_read_reg(struct i2c_client *client, u32 reg, u32 *buf)
 
 		input_err(true, &client->dev, "%s: i2c failed (%d), cmd: %x\n",
 			  __func__, ret, reg);
+		kfree(t_u8_reg);
 		return -EIO;
 	}
 
+/*
+	{
+		int i;
+
+		pr_info("sec_input: I2C: %s\n", __func__);
+		pr_info("sec_input: I2C: W: ");
+		for (i = 0; i < msg[0].len; i++) {
+			pr_cont("%02X ", msg[0].buf[i]);
+		}
+		pr_cont("\n");
+
+		pr_info("sec_input: I2C: R: ");
+		for (i = 0; i < msg[1].len; i++) {
+			pr_cont("%02X ", msg[1].buf[i]);
+
+		}
+		pr_cont("\n");
+	}
+*/
 	*buf = cpu_to_be32(*msg_buf);
 
 	kfree(msg_buf);
+	kfree(t_u8_reg);
 	mutex_unlock(&data->i2c_lock);
 
 	return 0;
@@ -495,7 +579,7 @@ int ist40xx_write_cmd(struct ist40xx_data *data, u32 cmd, u32 val)
 	}
 
 #ifdef CONFIG_INPUT_SEC_SECURE_TOUCH
-	if (atomic_read(&data->secure_enabled) == SECURE_TOUCH_ENABLED) {
+	if (atomic_read(&data->st_enabled) == SECURE_TOUCH_ENABLED) {
 		input_err(true, &data->client->dev,
 			  "%s: TSP no accessible from Linux, TUI is enabled!\n",
 			  __func__);
@@ -533,9 +617,22 @@ int ist40xx_write_cmd(struct ist40xx_data *data, u32 cmd, u32 val)
 			   __func__, ret, cmd, val);
 		return -EIO;
 	}
+/*
+	{
+		int i;
 
+		pr_info("sec_input: I2C: %s\n", __func__);
+		pr_info("sec_input: I2C: W: ");
+		for (i = 0; i < msg.len; i++) {
+			pr_cont("%02X ", msg.buf[i]);
+		}
+		pr_cont("\n");
+	}
+*/
 	if (data->initialized && (data->status.update != 1) && !data->ignore_delay)
 		ist40xx_delay(50);
+	else
+		ist40xx_delay(1);
 
 	mutex_unlock(&data->i2c_lock);
 	kfree(msg_buf);
@@ -702,6 +799,8 @@ int ist40xx_power_off(struct ist40xx_data *data)
 	}
 	data->status.noise_mode = false;
 
+	ist40xx_delay(30);
+
 	return ret;
 }
 
@@ -720,8 +819,6 @@ int ist40xx_reset(struct ist40xx_data *data, bool download)
 		return ret;
 	}
 
-	ist40xx_delay(30);
-
 	ret = ist40xx_power_on(data, download);
 	if (ret) {
 		input_err(true, &data->client->dev,
@@ -730,9 +827,12 @@ int ist40xx_reset(struct ist40xx_data *data, bool download)
 	}
 
 	ist40xx_write_sponge_reg(data, IST40XX_SPONGE_CTRL, (u16*)&data->lpm_mode,
-			1);
+			1, false);
+
+	data->ignore_delay = true;
 	ist40xx_write_cmd(data, IST40XX_HIB_CMD,
-			(eHCOM_NOTIRY_G_REGMAP << 16) | IST40XX_ENABLE);
+		(eHCOM_NOTIRY_G_REGMAP << 16) | IST40XX_ENABLE);
+	data->ignore_delay = false;
 
 	if (temp_sys_mode == STATE_LPM) {
 		ist40xx_cmd_gesture(data, IST40XX_ENABLE);

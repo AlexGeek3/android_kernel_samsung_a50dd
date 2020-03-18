@@ -1029,7 +1029,6 @@ static ssize_t camera_rear_force_cal_load_show(struct device *dev,
 }
 #endif
 
-
 static DEVICE_ATTR(rear_sensorid,        S_IRUGO, camera_rear_sensorid_show,        NULL);
 static DEVICE_ATTR(rear_moduleid,        S_IRUGO, camera_rear_moduleid_show,        NULL);
 static DEVICE_ATTR(rear_camtype,         S_IRUGO, camera_rear_camtype_show,         NULL);
@@ -2769,8 +2768,12 @@ static ssize_t camera_rear3_dualcal_show(struct device *dev,
 	read_from_firmware_version(position);
 	fimc_is_sec_get_cal_buf(position, &cal_buf);
 
+	if (specific->rom_cal_map_addr[position] == NULL)
+		return 0;
+
 	dual_cal_data2_addr = specific->rom_cal_map_addr[position]->rom_dual_cal_data2_start_addr;
 	dual_cal_data2_size = specific->rom_cal_map_addr[position]->rom_dual_cal_data2_size;
+
 
 	if (dual_cal_data2_addr > 0 && dual_cal_data2_size > 0) {
 		memcpy(buf, &cal_buf[dual_cal_data2_addr], dual_cal_data2_size);
@@ -3402,7 +3405,6 @@ int fimc_is_create_rear_sysfs(struct class *camera)
 			dev_attr_rear_force_cal_load.attr.name);
 	}
 #endif
-
 #ifdef USE_CAMERA_HW_BIG_DATA
 	if (device_create_file(camera_rear_dev, &dev_attr_rear_hwparam) < 0) {
 		printk(KERN_ERR "failed to create rear device file, %s\n",

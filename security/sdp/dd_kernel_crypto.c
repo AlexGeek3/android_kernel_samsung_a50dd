@@ -24,7 +24,7 @@
 #define DD_AES_256_GCM_IV_SIZE  12
 #define DD_AES_256_GCM_AAD      "DDAR_ADDITIONAL_AUTHENTICATION_DATA"
 
-int dd_create_crypt_context(struct inode *inode, const struct dd_policy *policy) {
+int dd_create_crypt_context(struct inode *inode, const struct dd_policy *policy, void *fs_data) {
 	struct dd_crypt_context crypt_context;
 	int rc = 0;
 
@@ -138,7 +138,7 @@ out:
 		dd_error("failed to create crypt context rc:%d\n", rc);
 		return rc;
 	}
-	return dd_write_crypt_context(inode, &crypt_context);
+	return dd_write_crypt_context(inode, &crypt_context, fs_data);
 }
 
 #if USE_KEYRING

@@ -212,11 +212,6 @@ int sensor_4ha_cis_init(struct v4l2_subdev *subdev)
 	CALL_CISOPS(cis, cis_get_max_digital_gain, subdev, &setinfo.return_value);
 	dbg_sensor(1, "[%s] max dgain : %d\n", __func__, setinfo.return_value);
 
-#ifdef DEBUG_SENSOR_TIME
-	do_gettimeofday(&end);
-	dbg_sensor(1, "[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
-#endif
-
 p_err:
 	return ret;
 }
@@ -1138,12 +1133,6 @@ int sensor_4ha_cis_adjust_analog_gain(struct v4l2_subdev *subdev, u32 input_agai
 
 	u32 again_code = 0;
 	u32 again_permile = 0;
-
-#ifdef DEBUG_SENSOR_TIME
-	struct timeval st, end;
-
-	do_gettimeofday(&st);
-#endif
 
 	FIMC_BUG(!subdev);
 	FIMC_BUG(!target_permile);

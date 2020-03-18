@@ -52,8 +52,8 @@ static void scsc_bt_shm_irq_handler(int irqbit, void *data)
 	/* Clear interrupt */
 	scsc_service_mifintrbit_bit_clear(bt_service.service, irqbit);
 
-    /* Ensure irq bit is cleared before reading the mailbox indexes */
-    mb();
+	/* Ensure irq bit is cleared before reading the mailbox indexes */
+	mb();
 
 	bt_service.interrupt_count++;
 
@@ -836,6 +836,8 @@ static ssize_t scsc_bt_shm_h4_read_iq_report_evt(char __user *buf, size_t len)
 		h4_iq_report_evt[index++] = td->cte_type;
 		h4_iq_report_evt[index++] = td->slot_durations;
 		h4_iq_report_evt[index++] = td->packet_status;
+		h4_iq_report_evt[index++] = td->event_count & 0xFF;
+		h4_iq_report_evt[index++] = (td->event_count >> 8) & 0xFF;
 		h4_iq_report_evt[index++] = td->sample_count;
 
 		/* Total length of hci event */
@@ -1295,30 +1297,34 @@ ssize_t scsc_bt_shm_h4_read(struct file *file, char __user *buf, size_t len, lof
 
 		/* First: process any pending HCI event that needs to be sent to userspace */
 		res = scsc_bt_shm_h4_read_hci_evt(&buf[consumed], len - consumed);
-		if (0 < res)
-			consumed += res;
-		else
+		if (res < 0) {
 			ret = res;
+			break;
+		}
+		consumed += res;
 
 		/* Second: process any pending ACL data that needs to be sent to userspace */
 		res = scsc_bt_shm_h4_read_acl_data(&buf[consumed], len - consumed);
-		if (0 < res)
-			consumed += res;
-		else
+		if (res < 0) {
 			ret = res;
+			break;
+		}
+		consumed += res;
 
 		/* Third: process any pending ACL data that needs to be sent to userspace */
 		res = scsc_bt_shm_h4_read_acl_credit(&buf[consumed], len - consumed);
-		if (0 < res)
-			consumed += res;
-		else
+		if (res < 0) {
 			ret = res;
+			break;
+		}
+		consumed += res;
 
 		res = scsc_bt_shm_h4_read_iq_report_evt(&buf[consumed], len - consumed);
-		if (res > 0)
-			consumed += res;
-		else
+		if (res < 0) {
 			ret = res;
+			break;
+		}
+		consumed += res;
 	}
 
 	if (0 == ret && 0 == consumed) {
@@ -1515,6 +1521,8 @@ unsigned scsc_bt_shm_h4_poll(struct file *file, poll_table *wait)
 	    bt_service.bsmhcp_protocol->header.mailbox_acl_rx_read ||
 	    bt_service.bsmhcp_protocol->header.mailbox_acl_free_write !=
 	    bt_service.bsmhcp_protocol->header.mailbox_acl_free_read ||
+	    bt_service.bsmhcp_protocol->header.mailbox_iq_report_write !=
+	    bt_service.bsmhcp_protocol->header.mailbox_iq_report_read ||
 	    (bt_service.read_operation != BT_READ_OP_NONE &&
 	     bt_service.read_operation != BT_READ_OP_STOP) ||
 	    ((BT_READ_OP_STOP != bt_service.read_operation) &&

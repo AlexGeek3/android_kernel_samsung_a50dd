@@ -72,7 +72,7 @@ enum task_index {
 #define TASK_AF_AFFINITY		(1)
 #define TASK_ISP_DMA_AFFINITY		(2)
 #define TASK_3AA_DMA_AFFINITY		(TASK_ISP_DMA_AFFINITY)
-#define TASK_AA_AFFINITY		(TASK_AF_AFFINITY)
+#define TASK_AA_AFFINITY		(TASK_OTF_AFFINITY)
 /* #define TASK_RTA_AFFINITY		(1) */ /* There is no need to set of cpu affinity for RTA task */
 #define TASK_VRA_AFFINITY		(2)
 
@@ -130,7 +130,9 @@ enum memory_track_type {
 
 	/* memory block */
 	MT_TYPE_MB_HEAP	= 0x10,
-	MT_TYPE_MB_DMA,
+	MT_TYPE_MB_DMA_TAAISP,
+	MT_TYPE_MB_DMA_MEDRC,
+	MT_TYPE_MB_DMA_TNR,
 
 	MT_TYPE_MB_VRA	= 0x20,
 
@@ -225,7 +227,9 @@ struct fimc_is_lib_support {
 
 	/* memory blocks */
 	struct lib_mem_block			mb_heap_rta;
-	struct lib_mem_block			mb_dma;
+	struct lib_mem_block			mb_dma_taaisp;
+	struct lib_mem_block			mb_dma_medrc;
+	struct lib_mem_block			mb_dma_tnr;
 	struct lib_mem_block			mb_vra;
 	/* non-memory block */
 	spinlock_t				slock_nmb;
@@ -324,7 +328,7 @@ int fimc_is_dva_vra(ulong kva, u32 *dva);
 void fimc_is_inv_vra(ulong kva, u32 size);
 void fimc_is_clean_vra(ulong kva, u32 size);
 
-bool fimc_is_lib_in_interrupt(void);
+bool fimc_is_lib_in_irq(void);
 
 int fimc_is_load_bin_on_boot(void);
 void fimc_is_load_ctrl_unlock(void);

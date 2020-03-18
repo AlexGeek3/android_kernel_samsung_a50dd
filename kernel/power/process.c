@@ -133,14 +133,13 @@ static int try_to_freeze_tasks(bool user_only)
 			    && freezing(p) && !frozen(p)) {
 				sched_show_task(p);
 				sec_debug_set_extra_info_backtrace_task(p);
-				sec_debug_set_extra_info_rvd1(p->comm);
+				sec_debug_set_extra_info_unfz(p->comm);
 			}
 		}
 		read_unlock(&tasklist_lock);
 
-		sec_debug_set_extra_info_rvd1(sys_state[system_state]);
+		sec_debug_set_extra_info_unfz(sys_state[system_state]);
 		panic("fail to freeze tasks");
-		
 	} else {
 		pr_cont("(elapsed %d.%03d seconds) ", elapsed_msecs / 1000,
 			elapsed_msecs % 1000);

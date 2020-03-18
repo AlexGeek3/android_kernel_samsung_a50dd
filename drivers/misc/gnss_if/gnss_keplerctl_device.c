@@ -263,6 +263,8 @@ static int kepler_release_reset(struct gnss_ctl *gc)
 	gnss_state_changed(gc, STATE_ONLINE);
 	mcu_ipc_clear_all_interrupt(MCU_GNSS);
 
+	enable_irq(gc->req_init_irq);
+	
 	gc->pmu_ops->release_reset();
 
 	if (gc->ccore_qch_lh_gnss) {
@@ -272,14 +274,16 @@ static int kepler_release_reset(struct gnss_ctl *gc)
 		else
 			gif_err("Could not enable Qch (%d)\n", ret);
 	}
-
-	enable_irq(gc->req_init_irq);
+	
 	ret = wait_for_completion_timeout(&gc->req_init_cmpl, timeout);
 	if (ret == 0) {
 		gif_err("%s: req_init_cmpl TIMEOUT!\n", gc->name);
 		disable_irq_nosync(gc->req_init_irq);
 		return -EIO;
 	}
+	
+	mdelay(100);
+	
 	ret = gc->pmu_ops->req_security();
 	if (ret != 0) {
 		gif_err("req_security error! %d\n", ret);

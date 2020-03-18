@@ -32,6 +32,9 @@ PCI_MBOX_SHARED_DATA_ATTR struct pcie_mbox_shared_data {
 	struct pcie_mbox_intgen_shared_data ap_interrupt;
 	struct pcie_mbox_intgen_shared_data r4_interrupt;
 	struct pcie_mbox_intgen_shared_data m4_interrupt;
+#ifdef CONFIG_SCSC_MX450_GDB_SUPPORT
+	struct pcie_mbox_intgen_shared_data m4_1_interrupt;
+#endif
 };
 
 #endif /* __PCIE_MBOX_SHARED_DATA_H */

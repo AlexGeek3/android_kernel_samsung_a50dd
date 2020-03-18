@@ -366,9 +366,9 @@ ssize_t get_gyro_icm42605m_selftest(struct ssp_data *data, char *buf)
         ratio_result = 0;
     }
 
-	/* AVG value range test +/- 40 */
-	if ((ABS(gyro_fifo_avg[0]) > 40) || (ABS(gyro_fifo_avg[1]) > 40) ||
-	    (ABS(gyro_fifo_avg[2]) > 40)) {
+	/* AVG value range test +/- 10 */
+	if ((ABS(gyro_fifo_avg[0]) > 10) || (ABS(gyro_fifo_avg[1]) > 10) ||
+	    (ABS(gyro_fifo_avg[2]) > 10)) {
 		ssp_dbg("[SSP]: %s - %d,%d,%d fail.\n", __func__,
 		        gyro_fifo_avg[0], gyro_fifo_avg[1], gyro_fifo_avg[2]);
 		return sprintf(buf, "%d,%d,%d\n",
@@ -503,60 +503,6 @@ exit:
 
 }
 
-ssize_t get_gyro_icm42605m_selftest_dps(struct ssp_data *data, char *buf)
-{
-	return sprintf(buf, "%u\n", data->buf[SENSOR_TYPE_GYROSCOPE].gyro_dps);
-}
-
-ssize_t set_gyro_icm42605m_selftest_dps(struct ssp_data *data, const char *buf)
-{
-#if 0
-	int new_dps = 0;
-	int ret = 0;
-	char *buffer = NULL;
-	int buffer_length = 0;
-
-	if (!(data->sensor_probe_state & (1ULL << SENSOR_TYPE_GYROSCOPE))) {
-		goto exit;
-	}
-
-	sscanf(buf, "%9d", &new_dps);
-
-	ret = ssp_send_command(data, CMD_GETVALUE, SENSOR_TYPE_GYROSCOPE,
-	                       GYROSCOPE_DPS_FACTORY, 3000, NULL, 0, &buffer, &buffer_length);
-
-	if (ret != SUCCESS) {
-		ssp_errf("ssp_send_command Fail %d", ret);
-		goto exit;
-	}
-
-	if (buffer == NULL) {
-		ssp_errf("buffer is null");
-		ret = FAIL;
-		goto exit;
-	}
-
-	if ((*buffer) != SUCCESS) {
-		pr_err("[SSP]: %s - Gyro Selftest DPS Error!!\n", __func__);
-		goto exit;
-	}
-
-	data->buf[SENSOR_TYPE_GYROSCOPE].gyro_dps = (unsigned int)new_dps;
-	pr_err("[SSP]: %s - %u dps stored\n", __func__,
-	       data->buf[SENSOR_TYPE_GYROSCOPE].gyro_dps);
-exit:
-
-
-	if (buffer != NULL) {
-		kfree(buffer);
-	}
-
-	return ret;
-#else
-    return ERROR;
-#endif
-}
-
 struct gyroscope_sensor_operations gyro_icm42605m_ops = {
 	.get_gyro_name = get_gyro_icm42605m_name,
 	.get_gyro_vendor = get_gyro_icm42605m_vendor,
@@ -564,8 +510,6 @@ struct gyroscope_sensor_operations gyro_icm42605m_ops = {
 	.get_gyro_power_on = get_gyro_icm42605m_power_on,
 	.get_gyro_temperature = get_gyro_icm42605m_temperature,
 	.get_gyro_selftest = get_gyro_icm42605m_selftest,
-	.get_gyro_selftest_dps = get_gyro_icm42605m_selftest_dps,
-	.set_gyro_selftest_dps = set_gyro_icm42605m_selftest_dps,
 };
 
 struct gyroscope_sensor_operations* get_gyroscope_icm42605m_function_pointer(struct ssp_data *data)

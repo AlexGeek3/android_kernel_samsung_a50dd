@@ -686,6 +686,7 @@ int decon_set_par(struct fb_info *info)
 	win_regs.offset_y = var->yoffset;
 	win_regs.type = decon->dt.dft_idma;
 	decon_reg_set_window_control(decon->id, win_no, &win_regs, false);
+	/* decon_reg_all_win_shadow_update_req(decon->id); */
 
 	decon_hiber_unblock(decon);
 	return 0;
@@ -858,7 +859,7 @@ int decon_pan_display(struct fb_var_screeninfo *var, struct fb_info *info)
 		break;
 	case 24:
 	case 32:
-		config.format = DECON_PIXEL_FORMAT_ABGR_8888;
+		config.format = DECON_PIXEL_FORMAT_ABGR_8888; /* DECON_PIXEL_FORMAT_BGRA_8888; */
 		break;
 	default:
 		decon_err("%s: Not supported bpp %d\n", __func__,
@@ -906,9 +907,9 @@ int decon_pan_display(struct fb_var_screeninfo *var, struct fb_info *info)
 	}
 
 	decon_reg_update_req_window(decon->id, win->idx);
-
-	/* decon_set_par(info); */
-
+#if 0
+	decon_set_par(info);
+#endif
 	decon_reg_start(decon->id, &psr);
 err:
 	decon_wait_for_vsync(decon, VSYNC_TIMEOUT_MSEC);

@@ -985,6 +985,7 @@ int fimc_is_sensor_buf_tag(struct fimc_is_device_sensor *device,
 		frame->fcount = ldr_frame->fcount;
 		frame->stream->findex = ldr_frame->index;
 		frame->stream->fcount = ldr_frame->fcount;
+		frame->result = 0;
 
 		ret = v4l2_subdev_call(v_subdev, video, s_rx_buffer, (void *)frame, NULL);
 		if (ret) {
@@ -1105,7 +1106,7 @@ static int fimc_is_sensor_notify_by_fstr(struct fimc_is_device_sensor *device, v
 				framemgr_x_barrier_irqr(framemgr, 0, flags);
 				return -EINVAL;
 			}
-			frameptr = (ctrl.value + 1) % framemgr->num_frames;
+			frameptr = (ctrl.value + dma_subdev->vc_buffer_offset) % framemgr->num_frames;
 			frame = &framemgr->frames[frameptr];
 			frame->fcount = device->fcount;
 
@@ -3414,7 +3415,7 @@ int fimc_is_sensor_front_stop(struct fimc_is_device_sensor *device)
 		goto reset_the_others;
 	}
 
-	if (!test_bit(FIMC_IS_SENSOR_FRONT_START, &device->state)) {
+	if (!test_and_clear_bit(FIMC_IS_SENSOR_FRONT_START, &device->state)) {
 		mwarn("already front stop", device);
 		goto already_stopped;
 	}
@@ -3430,7 +3431,6 @@ int fimc_is_sensor_front_stop(struct fimc_is_device_sensor *device)
 		merr("v4l2_csi_call(s_stream) is fail(%d)", device, ret);
 
 	set_bit(FIMC_IS_SENSOR_BACK_NOWAIT_STOP, &device->state);
-	clear_bit(FIMC_IS_SENSOR_FRONT_START, &device->state);
 
 reset_the_others:
 	if (device->use_standby)

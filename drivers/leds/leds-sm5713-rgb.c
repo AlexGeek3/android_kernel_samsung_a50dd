@@ -13,7 +13,7 @@
 #include <linux/of.h>
 #include <linux/leds.h>
 #include <linux/of_gpio.h>
-#include <linux/sec_sysfs.h>
+#include <linux/sec_class.h>
 #include <linux/mfd/sm5713.h>
 #include <linux/mfd/sm5713-private.h>
 

@@ -5,6 +5,7 @@
 #include "ssp_dev.h"
 #include "ssp_comm.h"
 #include "ssp_dump.h"
+#include "ssp_firmware.h"
 #include "../staging/nanohub/chub.h"
 #include "../staging/nanohub/chub_dbg.h"
 
@@ -126,9 +127,22 @@ void ssp_dump_write_file(void *ssp_data, int sec_time, int reason, void *sram_bu
 
 bool is_sensorhub_working(void *ssp_data)
 {
+	struct ssp_data *data = (struct ssp_data *)ssp_data;
 	struct contexthub_ipc_info *ipc = ((struct ssp_data *)ssp_data)->platform_data;
-	if(atomic_read(&ipc->chub_status) == CHUB_ST_RUN)
+	if(!work_busy(&data->work_reset) && atomic_read(&ipc->chub_status) == CHUB_ST_RUN && atomic_read(&ipc->in_reset) == 0)
 		return true;
 	else 
 		return false;
+}
+
+int ssp_download_firmware(void *ssp_data, struct device* dev, void * addr)
+{
+	struct ssp_data *data = ssp_data;
+	return download_sensorhub_firmware(data, dev, addr);
+}
+
+void ssp_set_fimware_name(void *ssp_data,const char *fw_name)
+{
+	struct ssp_data *data = ssp_data;
+	strcpy(data->fw_name, fw_name);
 }

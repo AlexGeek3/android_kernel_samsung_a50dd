@@ -21,8 +21,10 @@
 
 int initialize_sysfs(struct ssp_data *);
 void remove_sysfs(struct ssp_data *);
-int enable_sensor(struct ssp_data *data, unsigned int type);
-int disable_sensor(struct ssp_data *data, unsigned int type);
+
+int enable_legacy_sensor(struct ssp_data *data, unsigned int type);
+int disable_legacy_sensor(struct ssp_data *data, unsigned int type);
+int set_delay_legacy_sensor(struct ssp_data *data, unsigned int type, int sampling_period, int max_report_latency);
 
 #endif
 

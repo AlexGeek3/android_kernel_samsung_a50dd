@@ -1221,6 +1221,13 @@ static int s3c64xx_spi_setup(struct spi_device *spi)
 		return -ENODEV;
 	}
 
+#ifdef CONFIG_ESE_SECURE
+	if (sdd->port_id == CONFIG_ESE_SECURE_SPI_PORT) {
+		dev_info(&spi->dev,
+			"spi configuration for secure channel is skipped(eSE)\n");
+		return 0;
+	}
+#endif
 #ifdef ENABLE_SENSORS_FPRINT_SECURE
 	if (sdd->port_id == CONFIG_SENSORS_FP_SPI_NUMBER) {
 		dev_info(&spi->dev,
@@ -1228,7 +1235,6 @@ static int s3c64xx_spi_setup(struct spi_device *spi)
 		return 0;
 	}
 #endif
-
 
 	if (!spi_get_ctldata(spi)) {
 		if(cs->line != 0) {
@@ -1400,6 +1406,10 @@ static void exynos_usi_init(struct s3c64xx_spi_driver_data *sdd)
 	 * Due to this feature, the USI_RESET must be cleared (set as '0')
 	 * before transaction starts.
 	 */
+#ifdef CONFIG_ESE_SECURE
+	if (sdd->port_id == CONFIG_ESE_SECURE_SPI_PORT)
+		return;
+#endif
 #ifdef ENABLE_SENSORS_FPRINT_SECURE
 	if (sdd->port_id == CONFIG_SENSORS_FP_SPI_NUMBER)
 		return;
@@ -1414,6 +1424,10 @@ static void s3c64xx_spi_hwinit(struct s3c64xx_spi_driver_data *sdd, int channel)
 	void __iomem *regs = sdd->regs;
 	unsigned int val;
 
+#ifdef CONFIG_ESE_SECURE
+	if (channel == CONFIG_ESE_SECURE_SPI_PORT)
+		return;
+#endif
 #ifdef ENABLE_SENSORS_FPRINT_SECURE
 	if (channel == CONFIG_SENSORS_FP_SPI_NUMBER)
 		return;
@@ -1776,6 +1790,9 @@ static int s3c64xx_spi_probe(struct platform_device *pdev)
 		goto err3;
 	}
 	if (1
+#ifdef CONFIG_ESE_SECURE
+			&& (sdd->port_id != CONFIG_ESE_SECURE_SPI_PORT)
+#endif
 #ifdef ENABLE_SENSORS_FPRINT_SECURE
 			&& (sdd->port_id != CONFIG_SENSORS_FP_SPI_NUMBER)
 #endif

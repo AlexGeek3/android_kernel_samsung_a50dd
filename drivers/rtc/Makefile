@@ -21,6 +21,8 @@ rtc-core-$(CONFIG_RTC_INTF_DEV)		+= rtc-dev.o
 rtc-core-$(CONFIG_RTC_INTF_PROC)	+= rtc-proc.o
 rtc-core-$(CONFIG_RTC_INTF_SYSFS)	+= rtc-sysfs.o
 
+obj-$(CONFIG_RTC_ALARM_BOOT)	+= power-on-alarm.o
+
 # Keep the list ordered.
 
 obj-$(CONFIG_RTC_DRV_88PM80X)	+= rtc-88pm80x.o

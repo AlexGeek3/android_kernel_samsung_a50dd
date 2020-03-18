@@ -1419,7 +1419,7 @@ static void decon_reg_configure_lcd(u32 id, struct decon_param *p)
 
 	decon_reg_per_frame_off(id);
 }
-
+#if 1
 static void decon_reg_init_probe(u32 id, u32 dsi_idx, struct decon_param *p)
 {
 	struct decon_lcd *lcd_info = p->lcd_info;
@@ -1481,7 +1481,7 @@ static void decon_reg_init_probe(u32 id, u32 dsi_idx, struct decon_param *p)
 			lcd_info->xres, lcd_info->yres, overlap_w, NULL, p);
 	}
 }
-
+#endif
 
 static void decon_reg_set_blender_bg_size(u32 id, enum decon_dsi_mode dsi_mode,
 		u32 bg_w, u32 bg_h)
@@ -1735,6 +1735,7 @@ int decon_reg_init(u32 id, u32 dsi_idx, struct decon_param *p)
 	 * DECON does not need to start, if DECON is already
 	 * running(enabled in LCD_ON_UBOOT)
 	 */
+#if 1
 	if (decon_reg_get_run_status(id)) {
 		decon_info("decon_reg_init already called by BOOTLOADER\n");
 		decon_reg_init_probe(id, dsi_idx, p);
@@ -1742,6 +1743,7 @@ int decon_reg_init(u32 id, u32 dsi_idx, struct decon_param *p)
 			decon_reg_set_trigger(id, psr, DECON_TRIG_DISABLE);
 		return -EBUSY;
 	}
+#endif
 
 	dpu_reg_set_qactive_pll(id, true);
 

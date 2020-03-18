@@ -108,6 +108,7 @@ enum sysreg_isphq_reg_field {
 
 #define FIMC_IS_RESERVE_LIB_SIZE	(0x02000000)	/* 32MB */
 #define FIMC_IS_TAAISP_SIZE		(0x00500000)	/* 5MB */
+#define TAAISP_MEDRC_SIZE		(0x00000000)	/* zero */
 #define FIMC_IS_VRA_SIZE		(0x00800000)	/* 8MB */
 
 #define SYSREG_CAM_BASE_ADDR		0x12C20000

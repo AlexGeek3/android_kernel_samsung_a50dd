@@ -12,14 +12,14 @@ extern int dd_submit_bio(struct dd_info *info, struct bio *bio);
 int dd_test_and_inherit_context(
 		struct fscrypt_context *ctx,
 		struct inode *parent, struct inode *child,
-		struct fscrypt_info *ci)
+		struct fscrypt_info *ci, void *fs_data)
 {
 	// check if parent directory or file is ddar protected
 	if (ci && ci->ci_dd_info) {
 		dd_verbose("policy.flag:%x", ci->ci_dd_info->policy.flags);
 		ctx->knox_flags |= (ci->ci_dd_info->policy.flags << FSCRYPT_KNOX_FLG_DDAR_SHIFT) & FSCRYPT_KNOX_FLG_DDAR_MASK;
 
-		return dd_create_crypt_context(child, &ci->ci_dd_info->policy);
+		return dd_create_crypt_context(child, &ci->ci_dd_info->policy, fs_data);
 	} else {
 		return 0;
 	}
@@ -53,17 +53,22 @@ int update_encryption_context_with_dd_policy(
 		ret = -EEXIST;
 	}
 
-	ret = dd_create_crypt_context(inode, policy);
+	ret = dd_create_crypt_context(inode, policy, NULL);
 
 	inode_unlock(inode);
 
 	if (!ret) {
 		struct fscrypt_info	*ci = inode->i_crypt_info;
-		ci->ci_dd_info = alloc_dd_info(inode);
-		if (IS_ERR(ci->ci_dd_info)) {
-			dd_error("%s - failed to alloc dd info:%ld\n", __func__, inode->i_ino);
-			ret = -ENOMEM;
-			ci->ci_dd_info = NULL;
+		if (!ci) {
+			dd_error("failed to alloc dd_info: no fbe policy found\n");
+			ret = -EINVAL;
+		} else {
+			ci->ci_dd_info = alloc_dd_info(inode);
+			if (IS_ERR(ci->ci_dd_info)) {
+				dd_error("failed to alloc dd info:%ld\n", inode->i_ino);
+				ret = -ENOMEM;
+				ci->ci_dd_info = NULL;
+			}
 		}
 	}
 	return ret;

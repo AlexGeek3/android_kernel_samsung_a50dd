@@ -19,7 +19,6 @@
 #include "pcie_mif_module.h"
 #include "pcie_proc.h"
 #include "pcie_mbox.h"
-#include "pcie_mbox_shared_data_defs.h" /* for PCIE_MIF_MBOX_RESERVED_LEN */
 #include "functor.h"
 
 #define PCIE_MIF_RESET_REQUEST_SOURCE 31
@@ -62,6 +61,9 @@ struct pcie_mif {
 	struct functor trigger_ap_interrupt;
 	struct functor trigger_r4_interrupt;
 	struct functor trigger_m4_interrupt;
+#ifdef CONFIG_SCSC_MX450_GDB_SUPPORT
+	struct functor trigger_m4_1_interrupt;
+#endif
 };
 
 /* Private Macros */
@@ -77,6 +79,11 @@ struct pcie_mif {
 
 /** Upcast from trigger_m4_interrupt member to pcie_mif */
 #define pcie_mif_from_trigger_m4_interrupt(trigger) container_of(trigger, struct pcie_mif, trigger_m4_interrupt)
+
+#ifdef CONFIG_SCSC_MX450_GDB_SUPPORT
+/** Upcast from trigger_m4_interrupt member to pcie_mif */
+#define pcie_mif_from_trigger_m4_1_interrupt(trigger) container_of(trigger, struct pcie_mif, trigger_m4_1_interrupt)
+#endif
 
 /* Private Functions */
 
@@ -98,6 +105,23 @@ static void pcie_mif_emulate_reset_request_interrupt(struct pcie_mif *pcie)
 		pcie_mbox_clear_ap_interrupt_source(&pcie->mbox, PCIE_MIF_RESET_REQUEST_SOURCE);
 	}
 }
+
+#ifdef CONFIG_SCSC_QOS
+static int pcie_mif_pm_qos_add_request(struct scsc_mif_abs *interface, struct scsc_mifqos_request *qos_req, enum scsc_qos_config config)
+{
+	return 0;
+}
+
+static int pcie_mif_pm_qos_update_request(struct scsc_mif_abs *interface, struct scsc_mifqos_request *qos_req, enum scsc_qos_config config)
+{
+	return 0;
+}
+
+static int pcie_mif_pm_qos_remove_request(struct scsc_mif_abs *interface, struct scsc_mifqos_request *qos_req)
+{
+	return 0;
+}
+#endif
 
 irqreturn_t pcie_mif_isr(int irq, void *data)
 {
@@ -170,6 +194,23 @@ static void pcie_mif_trigger_m4_interrupt(struct functor *trigger)
 	iowrite32(0x00000001, pcie->registers + SCSC_PCIE_NEWMSG2);
 	mmiowb();
 };
+
+#ifdef CONFIG_SCSC_MX450_GDB_SUPPORT
+/**
+ * Trigger PCIe interrupt to M4.
+ *
+ * Called back via functor.
+ */
+static void pcie_mif_trigger_m4_1_interrupt(struct functor *trigger)
+{
+	struct pcie_mif *pcie = pcie_mif_from_trigger_m4_1_interrupt(trigger);
+
+	SCSC_TAG_DEBUG(PCIE_MIF, "Triggering M4 1 Mailbox interrupt.\n");
+
+	iowrite32(0x00000001, pcie->registers + SCSC_PCIE_NEWMSG3);
+	mmiowb();
+};
+#endif
 
 static void pcie_mif_destroy(struct scsc_mif_abs *interface)
 {
@@ -251,6 +292,9 @@ static void *pcie_mif_map(struct scsc_mif_abs *interface, size_t *allocated)
 	functor_init(&pcie->trigger_ap_interrupt, pcie_mif_trigger_ap_interrupt);
 	functor_init(&pcie->trigger_r4_interrupt, pcie_mif_trigger_r4_interrupt);
 	functor_init(&pcie->trigger_m4_interrupt, pcie_mif_trigger_m4_interrupt);
+#ifdef CONFIG_SCSC_MX450_GDB_SUPPORT
+	functor_init(&pcie->trigger_m4_1_interrupt, pcie_mif_trigger_m4_1_interrupt);
+#endif
 
 	/* Initialise mailbox emulation to use shared memory at the end of PCIE_MIF_PREALLOC_MEM */
 	pcie_mbox_init(
@@ -259,7 +303,12 @@ static void *pcie_mif_map(struct scsc_mif_abs *interface, size_t *allocated)
 		pcie->registers,
 		&pcie->trigger_ap_interrupt,
 		&pcie->trigger_r4_interrupt,
+#ifdef CONFIG_SCSC_MX450_GDB_SUPPORT
+		&pcie->trigger_m4_interrupt,
+		&pcie->trigger_m4_1_interrupt
+#else
 		&pcie->trigger_m4_interrupt
+#endif
 		);
 
 	/* Return the max allocatable memory on this abs. implementation */
@@ -465,7 +514,11 @@ struct scsc_mif_abs *pcie_mif_create(struct pci_dev *pdev, const struct pci_devi
 	pcie_if->irq_clear = pcie_mif_irq_clear;
 	pcie_if->mif_dump_registers = pcie_mif_dump_register;
 	pcie_if->mif_read_register = NULL;
-
+#ifdef CONFIG_SCSC_QOS
+	pcie_if->mif_pm_qos_add_request = pcie_mif_pm_qos_add_request;
+	pcie_if->mif_pm_qos_update_request = pcie_mif_pm_qos_update_request;
+	pcie_if->mif_pm_qos_remove_request = pcie_mif_pm_qos_remove_request;
+#endif
 	/* Suspend/resume not supported in PCIe MIF */
 	pcie_if->suspend_reg_handler = NULL;
 	pcie_if->suspend_unreg_handler = NULL;

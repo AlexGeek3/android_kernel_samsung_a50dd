@@ -63,7 +63,7 @@
 #include <soc/samsung/exynos-cpuhp.h>
 
 #ifdef CONFIG_SEC_PM
-#include <linux/sec_sysfs.h>
+#include <linux/sec_class.h>
 #endif
 
 /* Exynos generic registers */
@@ -217,6 +217,9 @@ static bool suspended;
 static DEFINE_MUTEX (thermal_suspend_lock);
 #endif
 static bool is_cpu_hotplugged_out;
+
+/* Define thermal interrupt related workqueue */
+struct workqueue_struct *thermal_irq_wq = NULL;
 
 /* list of multiple instance for each thermal sensor */
 static LIST_HEAD(dtm_dev_list);
@@ -1007,12 +1010,6 @@ static int exynos9610_tmu_read(struct exynos_tmu_data *data)
 					data->limited_frequency);
 			cpufreq_limited = true;
 			dbg_snapshot_thermal(data->pdata, temp, "limited", data->limited_frequency);
-		} else if ((temp < data->limited_threshold_release) && cpufreq_limited) {
-			pm_qos_update_request(&thermal_cpu_limit_request,
-					PM_QOS_CPU_FREQ_MAX_DEFAULT_VALUE);
-			cpufreq_limited = false;
-			dbg_snapshot_thermal(data->pdata, temp, "release_limited",
-							PM_QOS_CPU_FREQ_MAX_DEFAULT_VALUE);
 		}
 	}
 
@@ -1080,7 +1077,7 @@ static irqreturn_t exynos_tmu_irq(int irq, void *id)
 	struct exynos_tmu_data *data = id;
 
 	disable_irq_nosync(irq);
-	schedule_work(&data->irq_work);
+	queue_work(thermal_irq_wq, &data->irq_work);
 
 	return IRQ_HANDLED;
 }
@@ -1317,13 +1314,18 @@ static int exynos_map_dt_data(struct platform_device *pdev)
 	return 0;
 }
 
+static DEFINE_MUTEX (thermal_throttle_lock);
+
 static int exynos_throttle_cpu_hotplug(void *p, int temp)
 {
 	struct exynos_tmu_data *data = p;
 	int ret = 0;
 	struct cpumask mask;
+	unsigned int online_cpus;
 
 	temp = temp / MCELSIUS;
+
+	mutex_lock(&data->hotplug_lock);
 
 	if (is_cpu_hotplugged_out) {
 		if (temp < data->hotplug_in_threshold) {
@@ -1333,6 +1335,9 @@ static int exynos_throttle_cpu_hotplug(void *p, int temp)
 			 */
 			exynos_cpuhp_request("DTM", *cpu_possible_mask, 0);
 			is_cpu_hotplugged_out = false;
+
+			online_cpus = *(unsigned int *)cpumask_bits(cpu_online_mask);
+			pr_info("CPU HOTPLUG IN : 0x%x, Temp : %d\n", online_cpus, temp);
 		}
 	} else {
 		if (temp >= data->hotplug_out_threshold) {
@@ -1343,8 +1348,28 @@ static int exynos_throttle_cpu_hotplug(void *p, int temp)
 			is_cpu_hotplugged_out = true;
 			cpumask_and(&mask, cpu_possible_mask, cpu_coregroup_mask(0));
 			exynos_cpuhp_request("DTM", mask, 0);
+
+			online_cpus = *(unsigned int *)cpumask_bits(cpu_online_mask);
+			pr_info("CPU HOTPLUG OUT : 0x%x, Temp : %d\n", online_cpus, temp);
 		}
 	}
+
+	mutex_unlock(&data->hotplug_lock);
+
+#if defined(CONFIG_SOC_EXYNOS9610)
+	if (data->limited_frequency) {
+		/* cpufreq_limited flag is high and temp is lower than
+		 * limited_threshold_release, release max frequency.
+		 */
+		if ((temp < data->limited_threshold_release) && cpufreq_limited) {
+			pm_qos_update_request(&thermal_cpu_limit_request,
+					PM_QOS_CPU_FREQ_MAX_DEFAULT_VALUE);
+			cpufreq_limited = false;
+			dbg_snapshot_thermal(data->pdata, temp, "release_limited",
+							PM_QOS_CPU_FREQ_MAX_DEFAULT_VALUE);
+		}
+	}
+#endif
 
 	return ret;
 }
@@ -1720,6 +1745,7 @@ struct exynos_tmu_data *gpu_thermal_data;
 static int exynos_tmu_probe(struct platform_device *pdev)
 {
 	struct exynos_tmu_data *data;
+	struct workqueue_attrs attr;
 	unsigned int ctrl;
 	int ret;
 
@@ -1734,6 +1760,18 @@ static int exynos_tmu_probe(struct platform_device *pdev)
 	ret = exynos_map_dt_data(pdev);
 	if (ret)
 		goto err_sensor;
+
+	/* Regist high priorty workqueue */
+	if (!thermal_irq_wq) {
+		attr.nice = 0;
+		attr.no_numa = true;
+		cpumask_copy(attr.cpumask, cpu_coregroup_mask(0));
+
+		thermal_irq_wq = alloc_workqueue("%s", WQ_HIGHPRI | WQ_UNBOUND |\
+				WQ_MEM_RECLAIM | WQ_FREEZABLE,
+				0, "thermal_irq");
+		apply_workqueue_attrs(thermal_irq_wq, &attr);
+	}
 
 	INIT_WORK(&data->irq_work, exynos_tmu_work);
 
@@ -1821,6 +1859,9 @@ static int exynos_tmu_probe(struct platform_device *pdev)
 		cpuhp_setup_state_nocalls(CPUHP_EXYNOS_BOOST_CTRL_POST, "dtm_boost_cb",
 				exynos_tmu_boost_callback, exynos_tmu_boost_callback);
 	}
+
+	if (data->hotplug_enable)
+		mutex_init(&data->hotplug_lock);
 
 	if (!IS_ERR(data->tzd))
 		data->tzd->ops->set_mode(data->tzd, THERMAL_DEVICE_ENABLED);

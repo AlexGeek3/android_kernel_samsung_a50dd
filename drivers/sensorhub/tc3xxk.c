@@ -35,7 +35,7 @@
 #include <linux/uaccess.h>
 #include <linux/io.h>
 #include <linux/regulator/consumer.h>
-#include <linux/sec_sysfs.h>
+#include <linux/sec_class.h>
 #include <linux/pinctrl/consumer.h>
 #ifdef CONFIG_BATTERY_SAMSUNG
 #include <linux/sec_batt.h>

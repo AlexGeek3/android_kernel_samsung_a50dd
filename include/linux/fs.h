@@ -3429,4 +3429,7 @@ static inline bool dir_relax_shared(struct inode *inode)
 extern bool path_noexec(const struct path *path);
 extern void inode_nohighmem(struct inode *inode);
 
+/* for Android P */
+#define AID_USE_ROOT_RESERVED KGIDT_INIT(5678)
+
 #endif /* _LINUX_FS_H */

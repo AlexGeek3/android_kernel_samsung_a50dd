@@ -70,6 +70,9 @@ static bool fwhdr_parse_v02(char *fw, struct fwhdr *fwhdr)
 		SCSC_TAG_INFO(FW_LOAD, "hdr_length=%d\n", fwhdr->hdr_length);
 		fwhdr->r4_panic_record_offset = FWHDR_02_R4_PANIC_RECORD_OFFSET(fw);
 		fwhdr->m4_panic_record_offset = FWHDR_02_M4_PANIC_RECORD_OFFSET(fw);
+#ifdef CONFIG_SCSC_MX450_GDB_SUPPORT
+		fwhdr->m4_1_panic_record_offset = FWHDR_02_M4_PANIC_RECORD_OFFSET(fw);
+#endif
 		return true;
 	}
 	return false;

@@ -38,6 +38,12 @@
 
 #include "fimc-is-device-module-base.h"
 
+#ifndef USE_VENDOR_PWR_PIN_NAME
+#define S5K4HA_IOVDD    "CAM_VDDIO_1P8"
+#define S5K4HA_AVDD     "gpio_cam_2p8_en"
+#define S5K4HA_DVDD     "RCAM3_DVDD_1P2"
+#endif
+
 static struct fimc_is_sensor_cfg config_module_4ha[] = {
 	/* 3264x2448@30fps */
 	FIMC_IS_SENSOR_CFG(3264, 2448,  30, 0, 0, CSI_DATA_LANES_4, 671, CSI_MODE_VC_ONLY, PD_NONE,
@@ -121,7 +127,7 @@ static int sensor_module_4ha_power_setpin(struct device *dev,
 	struct fimc_is_core *core;
 	struct device_node *dnode = dev->of_node;
 	int gpio_reset = 0;
-	int gpio_cam_2p8_en = 0;
+	int gpio_cam_a2p8_en = 0;
 	int gpio_none = 0;
 
 	FIMC_BUG(!dev);
@@ -143,40 +149,39 @@ static int sensor_module_4ha_power_setpin(struct device *dev,
 		gpio_free(gpio_reset);
 	}
 		
-	gpio_cam_2p8_en = of_get_named_gpio(dnode, "gpio_cam_2p8_en", 0);
-	if (!gpio_is_valid(gpio_cam_2p8_en)) {
-		dev_err(dev, "failed to get gpio_cam_2p8_en\n");
+	gpio_cam_a2p8_en = of_get_named_gpio(dnode, S5K4HA_AVDD, 0);
+	if (!gpio_is_valid(gpio_cam_a2p8_en)) {
+		dev_err(dev, "failed to get gpio_cam_a2p8_en\n");
 		return -EINVAL;
 	} else {
-		gpio_request_one(gpio_cam_2p8_en, GPIOF_OUT_INIT_LOW, "CAM_GPIO_OUTPUT_LOW");
-		gpio_free(gpio_cam_2p8_en);
+		gpio_request_one(gpio_cam_a2p8_en, GPIOF_OUT_INIT_LOW, "CAM_GPIO_OUTPUT_LOW");
+		gpio_free(gpio_cam_a2p8_en);
 	}
 
-	SET_PIN_INIT(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON);
-	SET_PIN_INIT(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_OFF);
+	SET_PIN_INIT(pdata, SENSOR_SCENARIO_NORMAL,   GPIO_SCENARIO_ON);
+	SET_PIN_INIT(pdata, SENSOR_SCENARIO_NORMAL,   GPIO_SCENARIO_OFF);
 	SET_PIN_INIT(pdata, SENSOR_SCENARIO_READ_ROM, GPIO_SCENARIO_ON);
 	SET_PIN_INIT(pdata, SENSOR_SCENARIO_READ_ROM, GPIO_SCENARIO_OFF);
 
 	/* SENSOR_SCENARIO_NORMAL on */
-	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON, gpio_reset, "sen_rst low", PIN_OUTPUT, 0, 0);
-	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON, gpio_cam_2p8_en, "gpio_cam_2p8_en", PIN_OUTPUT, 1, 0); /* RCAM3_AVDD_2P8 */
-	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON, gpio_none, "RCAM3_DVDD_1P2", PIN_REGULATOR, 1, 0); /* RCAM3_DVDD_1P2 */
-	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON, gpio_none, "CAM_VDDIO_1P8", PIN_REGULATOR, 1, 2000); /* CAM_VDDIO_1P8 */	 
-	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON, gpio_none, "pin", PIN_FUNCTION, 2, 1000);
-	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON, gpio_reset, "sen_rst high", PIN_OUTPUT, 1, 3000);
+	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON,  gpio_reset,  SENSOR_RESET_LOW,    PIN_OUTPUT, 0, 0);
+	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON,  gpio_cam_a2p8_en, S5K4HA_AVDD,    PIN_OUTPUT, 1, 0);
+	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON,  gpio_none,        S5K4HA_DVDD, PIN_REGULATOR, 1, 0);
+	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON,  gpio_none,       S5K4HA_IOVDD, PIN_REGULATOR, 1, 2000);
+	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON,  gpio_none,    SENSOR_MCLK_PIN,  PIN_FUNCTION, 2, 1000);
+	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON,  gpio_reset, SENSOR_RESET_HIGH,    PIN_OUTPUT, 1, 3000);
 
 	/* SENSOR_SCENARIO_NORMAL off */
-	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_OFF, gpio_none, "pin", PIN_FUNCTION, 1, 1000);
-
-	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_OFF, gpio_reset, "sen_rst low", PIN_OUTPUT, 0, 1500);
-	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_OFF, gpio_cam_2p8_en, "gpio_cam_2p8_en", PIN_OUTPUT, 0, 0); /* RCAM3_AVDD_2P8 */
-	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_OFF, gpio_none, "RCAM3_DVDD_1P2", PIN_REGULATOR, 0, 0); /* RCAM3_DVDD_1P2 */
-	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_OFF, gpio_none, "CAM_VDDIO_1P8", PIN_REGULATOR, 0, 0); /* CAM_VDDIO_1P8 */	 
+	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_OFF, gpio_none,    SENSOR_MCLK_PIN,  PIN_FUNCTION, 1, 1000);
+	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_OFF, gpio_reset,  SENSOR_RESET_LOW,    PIN_OUTPUT, 0, 1500);
+	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_OFF, gpio_cam_a2p8_en, S5K4HA_AVDD,    PIN_OUTPUT, 0, 0);
+	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_OFF, gpio_none,        S5K4HA_DVDD, PIN_REGULATOR, 0, 0);
+	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_OFF, gpio_none,       S5K4HA_IOVDD, PIN_REGULATOR, 0, 0);
 
 	/* READ_ROM - POWER ON */
-	SET_PIN(pdata, SENSOR_SCENARIO_READ_ROM, GPIO_SCENARIO_ON, gpio_none, "CAM_VDDIO_1P8", PIN_REGULATOR, 1, 0); /* CAM_VDDIO_1P8 */
+	SET_PIN(pdata, SENSOR_SCENARIO_READ_ROM, GPIO_SCENARIO_ON,  gpio_none,     S5K4HA_IOVDD, PIN_REGULATOR, 1, 3000);
 	/* READ_ROM - POWER OFF */
-	SET_PIN(pdata, SENSOR_SCENARIO_READ_ROM, GPIO_SCENARIO_OFF, gpio_none, "CAM_VDDIO_1P8", PIN_REGULATOR, 0, 0); /* CAM_VDDIO_1P8 */
+	SET_PIN(pdata, SENSOR_SCENARIO_READ_ROM, GPIO_SCENARIO_OFF, gpio_none,     S5K4HA_IOVDD, PIN_REGULATOR, 0, 0);
 
 	dev_info(dev, "%s X v4\n", __func__);
 

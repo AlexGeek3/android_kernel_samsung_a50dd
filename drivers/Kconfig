@@ -224,12 +224,14 @@ source "drivers/fingerprint/Kconfig"
 
 source "drivers/motor/Kconfig"
 
-source "drivers/staging/samsung/sec_notifier/Kconfig"
-
 source "drivers/vision/Kconfig"
 
 source "drivers/sensorhub/Kconfig"
 
 source "drivers/five/Kconfig"
+
+source "drivers/icdrv/Kconfig"
+
+source "drivers/samsung/Kconfig"
 
 endmenu

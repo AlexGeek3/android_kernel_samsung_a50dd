@@ -24,15 +24,16 @@
  */
 
 
-#if 0
-#include <linux/muic/muic.h>
-#include <linux/muic/muic_notifier.h>
-#include <linux/vbus_notifier.h>
-#endif
-#if 0
-#include <linux/usb/typec/usb_typec_manager_notifier.h>
-#endif
 #include <linux/input/sec_cmd.h>
+
+#if defined(CONFIG_INPUT_SEC_SECURE_TOUCH)
+#include <linux/pm_runtime.h>
+#include <linux/atomic.h>
+
+#define SECURE_TOUCH_ENABLED	1
+#define SECURE_TOUCH_DISABLED	0
+#endif
+
 
 #define FIRMWARE_PATH_LENGTH		(64)
 #define FIRMWARE_PATH			("tsp_imagis/")
@@ -137,9 +138,6 @@ struct ts_test_result {
 #define IST40XX_MISCALIB_MASK		(0xFFFF0000)
 #define IST40XX_MISCALIB_MSG		(0x3CAB0000)
 #define IST40XX_MISCALIB_VAL(n)		(n & 0xFFFF)
-#define IST40XX_HOVER_MASK		(0xFFFFFF00)
-#define IST40XX_HOVER_MSG		(0x980C3100)
-#define IST40XX_HOVER_VAL(n)		(n & 0xFF)
 
 #define CALIB_MSG_MASK			(0xF0000FFF)
 #define CALIB_MSG_VALID			(0x80000CAB)
@@ -157,6 +155,8 @@ struct ts_test_result {
 #define IST40XX_SPAY			(1 << 1)
 #define IST40XX_AOD			(1 << 2)
 #define IST40XX_SINGLETAP		(1 << 3)
+#define IST40XX_FOD			(1 << 4)
+#define IST40XX_DOUBLETAP_WAKEUP	(1 << 5)
 
 #define EID_GESTURE			(2)
 
@@ -174,6 +174,9 @@ struct ts_test_result {
 #define G_ID_LONG_PRESS_LP		(0)
 #define G_ID_PRESS_NP			(1)
 #define G_ID_SINGLETAP			(0)
+#define G_ID_FOD_LONG			(0)
+#define G_ID_FOD_NORMAL		(1)
+#define G_ID_FOD_RELEASE	(2)
 
 #define NOISE_MODE_TA			(0)
 #define NOISE_MODE_CALL			(1)
@@ -184,6 +187,7 @@ struct ts_test_result {
 #define NOISE_MODE_TOUCHABLE		(6)
 #define NOISE_MODE_POWER		(8)
 #define NOISE_MODE_REJECTZONE		(9)
+#define NOISE_MODE_HALFAOD		(10)
 
 /* retry count */
 #define IST40XX_MAX_RETRY_CNT		(3)
@@ -317,6 +321,7 @@ struct ts_test_result {
 #define IST40XX_HIB_COORD		IST40XX_HA_ADDR(IST40XX_HIB_BASE | 0x08)
 #define IST40XX_HIB_GESTURE_REG		IST40XX_HA_ADDR(IST40XX_HIB_BASE | 0x0C)
 #define IST40XX_HIB_GESTURE_MSG		IST40XX_HA_ADDR(IST40XX_HIB_BASE | 0x1C)
+#define IST40XX_HIB_SPONGE_RECT		IST40XX_HA_ADDR(IST40XX_HIB_BASE | 0x50)
 #define IST40XX_HIB_PROX_SENSITI	IST40XX_HA_ADDR(IST40XX_HIB_BASE | 0x58)
 #define IST40XX_HIB_CMD			IST40XX_HA_ADDR(IST40XX_HIB_BASE | 0x5C)
 
@@ -340,6 +345,7 @@ struct ts_test_result {
 #define IST40XX_SPONGE_CTRL		(0x00)
 #define IST40XX_SPONGE_RECT		(0x02)
 #define IST40XX_SPONGE_UTC		(0x10)
+#define IST40XX_SPONGE_FOD_PROPERTY	(0x14)
 #define IST40XX_SPONGE_LP_DUMP		(0xF0)
 
 /* sysfs max buf */
@@ -350,6 +356,8 @@ struct ts_test_result {
 #define CHECK_INTR_STATUS(n)		(((n & IST40XX_INTR_STATUS) \
 						== IST40XX_INTR_STATUS) ? 1 : 0)
 #define IST40XX_TOUCH_FRAME_CNT		(2)
+#define PARSE_HOVER_NOTI(n)         ((n >> 2) & 0x1)
+#define PARSE_HOVER_VAL(n)          (n & 0x3)
 #define PARSE_TOUCH_CNT(n)		((n >> 12) & 0xF)
 #define PARSE_PALM_STATUS(n)		((n >> 10) & 0x1)
 
@@ -367,7 +375,7 @@ enum ist40xx_read_commands {
 	eHCOM_GET_CHIP_ID		= IST40XX_CMD_ADDR(0x00),
 	eHCOM_GET_VER_MAIN		= IST40XX_CMD_ADDR(0x01),
 	eHCOM_GET_VER_FW		= IST40XX_CMD_ADDR(0x02),
-	eHCOM_GET_VER_CORE		= IST40XX_CMD_ADDR(0x03),
+	eHCOM_GET_ALGOINFO		= IST40XX_CMD_ADDR(0x03),
 	eHCOM_GET_VER_TEST		= IST40XX_CMD_ADDR(0x04),
 	eHCOM_GET_CRC32			= IST40XX_CMD_ADDR(0x05),
 	eHCOM_GET_CAL_RESULT_P		= IST40XX_CMD_ADDR(0x06),
@@ -414,6 +422,9 @@ enum ist40xx_write_commands {
 	eHCOM_SET_TIME_IDLE		= 0x21,
 	eHCOM_SET_MODE_SPECIAL		= 0x22,
 	eHCOM_SET_LOCAL_MODEL		= 0x23,
+	eHCOM_SET_FOD_ENABLE		= 0x24,
+	eHCOM_SET_FOD_DISABLE		= 0x25,
+	eHCOM_SET_AOD_RECT		= 0x26,
 
 	eHCOM_RUN_RAMCODE		= 0x30,
 	eHCOM_RUN_CAL_AUTO		= 0x31,
@@ -494,7 +505,6 @@ struct ist40xx_status {
 struct ist40xx_version {
 	u32 main_ver;
 	u32 fw_ver;
-	u32 core_ver;
 	u32 test_ver;
 };
 
@@ -626,17 +636,21 @@ struct ist40xx_dt_data {
 	char fw_path[FIRMWARE_PATH_LENGTH];
 	char cmcs_path[FIRMWARE_PATH_LENGTH];
 	int octa_hw;
+	int bringup;
 	int item_version;
 	u32 area_indicator;
 	u32 area_navigation;
 	u32 area_edge;
+	u32 cm_min_spec;
+	u32 cm_max_spec;
+	u32 cm_spec_gap;
 	bool enable_settings_aot;
+	bool support_fod;
 };
 
 struct ist40xx_data {
 	struct mutex lock;
 	struct mutex i2c_lock;
-	struct mutex aod_lock;
 	struct i2c_client *client;
 	struct input_dev *input_dev;
 	struct input_dev *input_dev_proximity;
@@ -645,6 +659,9 @@ struct ist40xx_data {
 	TSP_INFO tsp_info;
 #ifdef CONFIG_HAS_EARLYSUSPEND
 	struct early_suspend early_suspend;
+#endif
+#ifdef CONFIG_PM
+	struct completion resume_done;
 #endif
 	struct ist40xx_status status;
 	struct ist40xx_fw fw;
@@ -681,6 +698,8 @@ struct ist40xx_data {
 	u32 miscal_addr;
 	u32 rec_addr;
 	u32 rec_size;
+	u32 algo_addr;
+	u32 algo_size;
 	u32 sec_info_addr;
 	u32 copy_sec_info_addr;
 	volatile bool irq_working;
@@ -695,6 +714,7 @@ struct ist40xx_data {
 	u16 rect_data[4];
 	u16 rejectzone_t;
 	u16 rejectzone_b;
+	u16 fod_property;
 	int scan_count;
 	int scan_retry;
 	int max_scan_retry;
@@ -721,10 +741,10 @@ struct ist40xx_data {
 #else
 	struct delayed_work work_force_release;
 #endif
-#if 0
+#ifdef CONFIG_MUIC_NOTIFIER
 	struct notifier_block muic_nb;
 #endif
-#if 0
+#ifdef CONFIG_USB_TYPEC_MANAGER_NOTIFIER
 	struct notifier_block ccic_nb;
 #endif
 #ifdef CONFIG_VBUS_NOTIFIER
@@ -750,7 +770,15 @@ struct ist40xx_data {
 	unsigned int scrub_y;
 	char node_buf[MAX_BUF_SIZE];
 	int node_cnt;
-
+#if defined(CONFIG_INPUT_SEC_SECURE_TOUCH)
+	atomic_t st_enabled;
+	atomic_t st_pending_irqs;
+	struct completion st_powerdown;
+	struct completion st_interrupt;
+#if defined(CONFIG_TRUSTONIC_TRUSTED_UI_QC)
+	struct completion st_irq_received;
+#endif
+#endif
 	u16 p_x[IST40XX_MAX_FINGER_ID];
 	u16 p_y[IST40XX_MAX_FINGER_ID];
 	u16 r_x[IST40XX_MAX_FINGER_ID];
@@ -765,6 +793,8 @@ typedef enum {
 	SPONGE_EVENT_TYPE_AOD_PRESS = 0x09,
 	SPONGE_EVENT_TYPE_AOD_LONGPRESS = 0x0A,
 	SPONGE_EVENT_TYPE_AOD_DOUBLETAB = 0x0B,
+	SPONGE_EVENT_TYPE_FOD		= 0x0F,
+	SPONGE_EVENT_TYPE_FOD_RELEASE	= 0x10
 } SPONGE_EVENT_TYPE;
 
 extern int ist40xx_log_level;
@@ -778,6 +808,7 @@ void ist40xx_disable_irq(struct ist40xx_data *data);
 void ist40xx_set_ta_mode(bool charging);
 void ist40xx_set_edge_mode(int mode);
 void ist40xx_set_call_mode(int mode);
+void ist40xx_set_halfaod_mode(int mode);
 void ist40xx_set_cover_mode(int mode);
 void ist40xx_set_sensitivity_mode(int mode);
 void ist40xx_set_glove_mode(int mode);
@@ -797,9 +828,9 @@ int ist40xx_burst_write(struct i2c_client *client, u32 addr, u32 *buf32,
 			u16 len);
 
 int ist40xx_write_sponge_reg(struct ist40xx_data *data, u16 idx, u16 *buf16,
-			     int len);
+			     int len, bool hold);
 int ist40xx_read_sponge_reg(struct ist40xx_data *data, u16 idx, u16 *buf16,
-			    int len);
+			    int len, bool hold);
 
 int ist40xx_cmd_gesture(struct ist40xx_data *data, u16 value);
 int ist40xx_cmd_start_scan(struct ist40xx_data *data);
@@ -814,7 +845,8 @@ int ist40xx_power_off(struct ist40xx_data *data);
 int ist40xx_reset(struct ist40xx_data *data, bool download);
 
 int ist40xx_init_system(struct ist40xx_data *data);
-void ist40xx_display_dump_log(struct ist40xx_data *data);
+void ist40xx_display_booting_dump_log(struct ist40xx_data *data);
+void ist40xx_display_key_dump_log(struct ist40xx_data *data);
 
 #ifdef SEC_FACTORY_MODE
 extern struct class *sec_class;
@@ -839,5 +871,9 @@ void run_cmcs_full_test(void *dev_data);
 #ifdef CONFIG_BATTERY_SAMSUNG
 extern unsigned int lpcharge;
 #endif
-
+#if defined(CONFIG_INPUT_SEC_SECURE_TOUCH)
+irqreturn_t ist40xx_irq_thread(int irq, void *ptr);
+irqreturn_t ist40xx_filter_interrupt(struct ist40xx_data *data);
+void ist40xx_secure_touch_stop(struct ist40xx_data *data, int blocking);
+#endif
 #endif  /* __IST40XX_H__ */

@@ -15,10 +15,18 @@
 
 #include "fimc-is-vender-specific.h"
 
-#if defined(CONFIG_CAMERA_VOGUE)
-#include "fimc-is-vender-rom-config_vogue.h"
-#elif defined(CONFIG_CAMERA_A50)
-#include "fimc-is-vender-rom-config_a50.h"
+#if defined(CONFIG_CAMERA_VXP_V00)
+#include "fimc-is-vender-rom-config_vxp_v00.h"
+#elif defined(CONFIG_CAMERA_AAS_V50)
+#include "fimc-is-vender-rom-config_aas_v50.h"
+#elif defined(CONFIG_CAMERA_AAS_V51)
+#include "fimc-is-vender-rom-config_aas_v51.h"
+#elif defined(CONFIG_CAMERA_AAS_V80)
+#include "fimc-is-vender-rom-config_aas_v80.h"
+#elif defined(CONFIG_CAMERA_AAS_V50S)
+#include "fimc-is-vender-rom-config_aas_v50s.h"
+#elif defined(CONFIG_CAMERA_MMS_V30S)
+#include "fimc-is-vender-rom-config_mms_v30s.h"
 #else
 
 const struct fimc_is_vender_rom_addr *vender_rom_addr[SENSOR_POSITION_MAX] = {

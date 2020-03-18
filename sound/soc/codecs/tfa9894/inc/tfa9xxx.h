@@ -16,6 +16,7 @@
 #include <linux/i2c.h>
 #include <linux/clk.h>
 #include <linux/leds.h>
+#include <linux/motor/timed_output.h>
 #include <sound/pcm.h>
 
 #include "tfa2_dev.h"
@@ -40,7 +41,7 @@
 #endif
 
 #define MCLK_START_DELAY 5 /* ms */
-#define FIXED_MCLK_RATE 19200000 /* 19.2 MHz */
+#define FIXED_MCLK_RATE 13000000 /* 13 MHz */
 
 /* DSP init status */
 enum tfa9xxx_dsp_init_state {
@@ -142,6 +143,7 @@ struct tfa9xxx {
 
 	/* Haptic */
 	struct led_classdev led_dev;
+	struct timed_output_dev motor_dev;
 	struct delayed_work pll_off_work;
 	struct drv_object tone_object;
 #ifdef PARALLEL_OBJECTS

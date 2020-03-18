@@ -80,12 +80,6 @@ struct vipx_ioc_execute_submodel {
 	_IOWR('V', 4, struct vipx_ioc_execute_submodel)
 
 union vipx_ioc_arg {
-	struct vs4l_graph			graph;
-	struct vs4l_format_list			flist;
-	struct vs4l_param_list			plist;
-	struct vs4l_ctrl			ctrl;
-	struct vs4l_container_list		clist;
-
 	struct vipx_ioc_load_kernel_binary	kernel_bin;
 	struct vipx_ioc_unload_kernel_binary	unload_kbin;
 	struct vipx_ioc_load_graph_info		load_ginfo;
@@ -94,22 +88,6 @@ union vipx_ioc_arg {
 };
 
 struct vipx_ioctl_ops {
-	/* TODO: vs4l(temp) */
-	int (*set_graph)(struct vipx_context *vctx,
-			struct vs4l_graph *graph);
-	int (*set_format)(struct vipx_context *vctx,
-			struct vs4l_format_list *flist);
-	int (*set_param)(struct vipx_context *vctx,
-			struct vs4l_param_list *plist);
-	int (*set_ctrl)(struct vipx_context *vctx,
-			struct vs4l_ctrl *ctrl);
-	int (*qbuf)(struct vipx_context *vctx,
-			struct vs4l_container_list *clist);
-	int (*dqbuf)(struct vipx_context *vctx,
-			struct vs4l_container_list *clist);
-	int (*streamon)(struct vipx_context *vctx);
-	int (*streamoff)(struct vipx_context *vctx);
-	/* dal */
 	int (*load_kernel_binary)(struct vipx_context *vctx,
 			struct vipx_ioc_load_kernel_binary *args);
 	int (*unload_kernel_binary)(struct vipx_context *vctx,

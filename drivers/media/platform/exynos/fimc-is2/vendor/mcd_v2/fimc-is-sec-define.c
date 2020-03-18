@@ -120,7 +120,10 @@ static char *otprom_cal_dump_path = "dump/otprom_cal.bin";
 
 char loaded_fw[FIMC_IS_HEADER_VER_SIZE + 1] = {0, };
 
-
+/* local function */
+#ifdef VENDER_CAL_STRUCT_VER2
+static void *fimc_is_sec_search_rom_extend_data(const struct rom_extend_cal_addr *extend_data, char *name);
+#endif
 
 bool fimc_is_sec_get_force_caldata_dump(void)
 {
@@ -300,8 +303,16 @@ u8 fimc_is_sec_compare_ver(int position)
 	if ((from_ver == def_ver) || (from_ver == def_ver2)) {
 		return finfo->cal_map_ver[3];
 	} else {
-		err("FROM core version is invalid. version is %c%c%c%c",
-			finfo->cal_map_ver[0], finfo->cal_map_ver[1], finfo->cal_map_ver[2], finfo->cal_map_ver[3]);
+		/*Check ASCII code for dumpstate */
+		if((finfo->cal_map_ver[0]>= '0') && (finfo->cal_map_ver[0]<= 'z') 
+			&& (finfo->cal_map_ver[1]>= '0') && (finfo->cal_map_ver[1]<= 'z')
+			&& (finfo->cal_map_ver[2]>= '0') && (finfo->cal_map_ver[2]<= 'z') 
+			&& (finfo->cal_map_ver[3]>= '0') && (finfo->cal_map_ver[3]<= 'z')) {
+			err("FROM core version is invalid. version is %c%c%c%c",
+					finfo->cal_map_ver[0], finfo->cal_map_ver[1], finfo->cal_map_ver[2], finfo->cal_map_ver[3]);
+		} else {
+			err("FROM core version is invalid. version is out of bounds");
+		}
 		return 0;
 	}
 
@@ -436,6 +447,16 @@ bool fimc_is_sec_check_eeprom_crc32(char *buf, int position)
 		check_base = finfo->oem_start_addr / 4;
 		checksum_base = finfo->oem_section_crc_addr / 4;
 
+#ifdef VENDER_CAL_STRUCT_VER2
+		if (rom_addr->extend_cal_addr) {
+			int32_t *addr;
+			addr = (int32_t *)fimc_is_sec_search_rom_extend_data(rom_addr->extend_cal_addr, EXTEND_OEM_CHECKSUM);
+			if (addr != NULL) {
+				if (finfo->oem_start_addr != *addr)
+					check_base = *addr / 4;
+			}
+		}
+#else
 #ifdef COUNT_EXTEND_CAL_DATA
 		if (rom_addr->extend_cal_addr) {
 			int i;
@@ -444,7 +465,6 @@ bool fimc_is_sec_check_eeprom_crc32(char *buf, int position)
 			for(i = 0; i < COUNT_EXTEND_CAL_DATA; i++) {
 				if (!strcmp(rom_addr->extend_cal_addr[i].name, name)) {
 					addr = rom_addr->extend_cal_addr[i].addr;
-
 					if (finfo->oem_start_addr != addr)
 						check_base = addr / 4;
 
@@ -452,6 +472,7 @@ bool fimc_is_sec_check_eeprom_crc32(char *buf, int position)
 				}
 			}
 		}
+#endif
 #endif
 
 #ifdef ROM_CRC32_DEBUG
@@ -555,6 +576,52 @@ bool fimc_is_sec_check_eeprom_crc32(char *buf, int position)
 	} else {
 		pr_warning("Camera[%d]: Skip to check shading crc32\n", position);
 	}
+
+#ifdef USE_AE_CAL
+	/* AE Cal Data CRC CHECK */
+
+	if (rom_addr->extend_cal_addr) {
+		struct rom_ae_cal_data *ae_cal_data = NULL;
+
+		ae_cal_data = (struct rom_ae_cal_data *)fimc_is_sec_search_rom_extend_data(rom_addr->extend_cal_addr, EXTEND_AE_CAL);
+
+		check_length = 0;
+		if(ae_cal_data) {
+			if (ae_cal_data->rom_ae_checksum_addr > 0)
+				check_length = ae_cal_data->rom_ae_checksum_len;
+
+			if (check_length > 0) {
+				checksum = 0;
+				check_base = finfo->ae_cal_start_addr / 4;
+				checksum_base = finfo->ae_cal_section_crc_addr / 4;
+
+#ifdef ROM_CRC32_DEBUG
+				printk(KERN_INFO "[CRC32_DEBUG] AE Cal Data CRC32 Check. check_length = %d, crc addr = 0x%08X\n",
+					check_length, finfo->ae_cal_section_crc_addr);
+				printk(KERN_INFO "[CRC32_DEBUG] start = 0x%08X, end = 0x%08X\n",
+					finfo->ae_cal_start_addr, finfo->ae_cal_end_addr);
+#endif
+
+				if (check_base > address_boundary || checksum_base > address_boundary) {
+					err("Camera[%d]: AE Cal Data address has error: start(0x%08X), end(0x%08X)",
+						position, finfo->ae_cal_start_addr, finfo->ae_cal_end_addr);
+					crc32_check_temp = false;
+					goto out;
+				}
+
+				checksum = (u32)getCRC((u16 *)&buf32[check_base], check_length, NULL, NULL);
+				if (checksum != buf32[checksum_base]) {
+					err("Camera[%d]: CRC32 error at the AE cal data (0x%08X != 0x%08X)", position, checksum, buf32[checksum_base]);
+					crc32_check_temp = false;
+					goto out;
+				}
+			} else {
+				pr_warning("Camera[%d]: Skip to check AE Cal Data crc32\n", position);
+			}
+
+		}
+	}
+#endif
 
 #ifdef SAMSUNG_LIVE_OUTFOCUS
 	/* DUAL Cal Data CRC CHECK */
@@ -749,7 +816,7 @@ bool fimc_is_sec_check_otp_crc32(char *buf, int position) {
 #ifdef OTP_OEM_START_ADDR
 	if (otp_oem_checksum_addr > 0) {
 #ifdef ROM_CRC32_DEBUG
-	printk(KERN_INFO "[CRC32_DEBUG] OEM CRC32 Check. check_length = %d, crc addr = 0x%08X\n", 
+	printk(KERN_INFO "[CRC32_DEBUG] OEM CRC32 Check. check_length = %d, crc addr = 0x%08X\n",
 		otp_oem_checksum_len, otp_oem_checksum_addr);
 #endif
 
@@ -773,7 +840,7 @@ bool fimc_is_sec_check_otp_crc32(char *buf, int position) {
 #ifdef OTP_AWB_START_ADDR
 	if (otp_awb_checksum_addr > 0) {
 #ifdef ROM_CRC32_DEBUG
-	printk(KERN_INFO "[CRC32_DEBUG] AWB CRC32 Check. check_length = %d, crc addr = 0x%08X\n", 
+	printk(KERN_INFO "[CRC32_DEBUG] AWB CRC32 Check. check_length = %d, crc addr = 0x%08X\n",
 		otp_awb_checksum_len, otp_awb_checksum_addr);
 #endif
 
@@ -1070,7 +1137,7 @@ bool fimc_is_sec_readcal_dump(struct fimc_is_vender_specific *specific, char **b
 
 	if(rom_valid == true) {
 		char path[50] = FIMC_IS_CAL_SDCARD_PATH;
-		
+
 		if(rom_type == ROM_TYPE_EEPROM) {
 			info("dump folder exist, Dump EEPROM cal data.\n");
 
@@ -1187,6 +1254,10 @@ int fimc_is_sec_readcal_eeprom(struct device *dev, int position)
 	char *buf = NULL;
 	char *cal_buf[2] = {NULL, NULL};
 	bool rom_common = false;
+
+#ifdef USE_AE_CAL
+	struct rom_ae_cal_data *ae_cal_data = NULL;
+#endif
 
 	int32_t cal_map_ver_start_addr, header_version_start_addr;
 	int32_t temp_start_addr = 0, temp_end_addr = 0;
@@ -1338,6 +1409,27 @@ crc_retry:
 			finfo->shading_end_addr = 0x3AFF;
 		}
 	}
+
+#ifdef USE_AE_CAL
+	/* Header Data: AE CAL DATA */
+	if (rom_addr->extend_cal_addr) {
+		ae_cal_data = (struct rom_ae_cal_data *)fimc_is_sec_search_rom_extend_data(rom_addr->extend_cal_addr, EXTEND_AE_CAL);
+		if(ae_cal_data) {
+			temp_start_addr = temp_end_addr = -1;
+			if (ae_cal_data->rom_header_main_ae_start_addr >= 0) {
+				temp_start_addr = ae_cal_data->rom_header_main_ae_start_addr;
+				temp_end_addr = ae_cal_data->rom_header_main_ae_end_addr;
+			}
+
+			if (temp_start_addr >= 0) {
+				finfo->ae_cal_start_addr = *((u32 *)&buf[temp_start_addr]);
+				finfo->ae_cal_end_addr = *((u32 *)&buf[temp_end_addr]);
+				info("AE Cal Data start = 0x%08x, end = 0x%08x\n", finfo->ae_cal_start_addr, finfo->ae_cal_end_addr);
+			}
+		}
+	}
+#endif
+
 #ifdef ENABLE_REMOSAIC_CAPTURE
 	/* Header Data: Sensor CAL (CrossTalk & LSC) */
 	temp_start_addr = temp_end_addr = -1;
@@ -1549,6 +1641,25 @@ crc_retry:
 	}
 
 /////////////////////////////////////////////////////////////////////////////////////
+/* AE Data: AE Module Info */
+/////////////////////////////////////////////////////////////////////////////////////
+#ifdef USE_AE_CAL
+	if(ae_cal_data) {
+		temp_start_addr = temp_end_addr = -1;
+		if (ae_cal_data->rom_ae_module_info_start_addr >= 0) {
+			temp_start_addr = ae_cal_data->rom_ae_module_info_start_addr;
+			temp_end_addr = ae_cal_data->rom_ae_checksum_addr;
+		}
+
+		if (temp_start_addr >= 0) {
+			memcpy(finfo->ae_cal_ver, &buf[temp_start_addr], FIMC_IS_AE_CAL_VER_SIZE);
+			finfo->ae_cal_ver[FIMC_IS_AE_CAL_VER_SIZE] = '\0';
+			finfo->ae_cal_section_crc_addr = temp_end_addr;
+		}
+	}
+#endif
+
+/////////////////////////////////////////////////////////////////////////////////////
 /* Dual CAL Data: Dual cal Module Info */
 /////////////////////////////////////////////////////////////////////////////////////
 #ifdef SAMSUNG_LIVE_OUTFOCUS
@@ -1626,6 +1737,15 @@ crc_retry:
 	info(" Module info : %s\n", finfo->awb_ver);
 	info("4. Shading info\n");
 	info(" Module info : %s\n", finfo->shading_ver);
+
+#ifdef USE_AE_CAL
+	if(ae_cal_data) {
+		if (ae_cal_data->rom_ae_module_info_start_addr >= 0) {
+			info("0. AE Data info\n");
+			info(" Module info : %s\n", finfo->ae_cal_ver);
+		}
+	}
+#endif
 
 #ifdef SAMSUNG_LIVE_OUTFOCUS
 	if (rom_addr->rom_dual_module_info_start_addr >= 0) {
@@ -2396,7 +2516,7 @@ crc_retry:
 		if (sysfs_finfo.header_ver[10] >= CAMERA_MODULE_ES_VERSION_REAR) {
 			is_latest_cam_module = true;
 		} else
-#endif 
+#endif
 		{
 			is_latest_cam_module = false;
 		}
@@ -2442,7 +2562,7 @@ int fimc_is_sec_readcal_otprom(struct device *dev, int position)
 	int ret = 0;
 #if defined(SENSOR_OTP_5E9)
 	ret = fimc_is_sec_readcal_otprom_5e9(dev, position);
-#else 
+#else
 	//ret = fimc_is_sec_readcal_otprom_legacy(dev, position);
 #endif
 	return ret;
@@ -2475,10 +2595,20 @@ int fimc_is_sec_fw_find_rear(struct fimc_is_core *core, int position)
 		snprintf(finfo->load_setfile_name, sizeof(FIMC_IS_IMX576_SETF), "%s", FIMC_IS_IMX576_SETF);
 	} else if (*sensor_id == SENSOR_NAME_S5K4HA) {
 		snprintf(finfo->load_setfile_name, sizeof(FIMC_IS_4HA_SETF), "%s", FIMC_IS_4HA_SETF);
-	} else if (*sensor_id == SENSOR_NAME_S5K5E9){
+	} else if (*sensor_id == SENSOR_NAME_S5K5E9) {
 		snprintf(finfo->load_setfile_name, sizeof(FIMC_IS_5E9_SETF), "%s", FIMC_IS_5E9_SETF);
-	} else if (*sensor_id == SENSOR_NAME_GC5035){
+	} else if (*sensor_id == SENSOR_NAME_GC5035) {
 		snprintf(finfo->load_setfile_name, sizeof(FIMC_IS_GC5035_SETF), "%s", FIMC_IS_GC5035_SETF);
+	} else if (*sensor_id == SENSOR_NAME_IMX582) {
+		snprintf(finfo->load_setfile_name, sizeof(FIMC_IS_IMX582_SETF), "%s", FIMC_IS_IMX582_SETF);
+	} else if (*sensor_id == SENSOR_NAME_HI1336) {
+		snprintf(finfo->load_setfile_name, sizeof(FIMC_IS_HI1336_SETF), "%s", FIMC_IS_HI1336_SETF);
+	} else if (*sensor_id == SENSOR_NAME_IMX586) {
+		snprintf(finfo->load_setfile_name, sizeof(FIMC_IS_IMX586_SETF), "%s", FIMC_IS_IMX586_SETF);
+	} else if (*sensor_id == SENSOR_NAME_S5K3L6) {
+		snprintf(finfo->load_setfile_name, sizeof(FIMC_IS_3L6_SETF), "%s", FIMC_IS_3L6_SETF);
+	} else if (*sensor_id == SENSOR_NAME_S5KGM2) {
+		snprintf(finfo->load_setfile_name, sizeof(FIMC_IS_GM2_SETF), "%s", FIMC_IS_GM2_SETF);
 	} else {
 		snprintf(finfo->load_setfile_name, sizeof(FIMC_IS_IMX576_SETF), "%s", FIMC_IS_IMX576_SETF);
 	}
@@ -2488,7 +2618,7 @@ int fimc_is_sec_fw_find_rear(struct fimc_is_core *core, int position)
 	if (fimc_is_sec_fw_module_compare(finfo->header_ver, FW_2P6_Q)) {
 		snprintf(finfo->load_setfile_name, sizeof(FIMC_IS_2P6_SETF), "%s", FIMC_IS_2P6_SETF);
 		*sensor_id = SENSOR_NAME_S5K2P6;
-	} 
+	}
 */
 
 	info("Camera[%d]%s: sensor id [%d]. load setfile [%s]\n",
@@ -2507,6 +2637,12 @@ int fimc_is_sec_fw_find_front(struct fimc_is_core *core, int position)
 	/* default firmware and setfile */
 	if (specific->front_sensor_id == SENSOR_NAME_S5K2X5) {
 		snprintf(finfo->load_setfile_name, sizeof(FIMC_IS_2X5_SETF), "%s", FIMC_IS_2X5_SETF);
+	} else if (specific->front_sensor_id == SENSOR_NAME_IMX616) {
+		snprintf(finfo->load_setfile_name, sizeof(FIMC_IS_IMX616_SETF), "%s", FIMC_IS_IMX616_SETF);
+	} else if (specific->front_sensor_id == SENSOR_NAME_HI1336) {
+		snprintf(finfo->load_setfile_name, sizeof(FIMC_IS_HI1336_SETF), "%s", FIMC_IS_HI1336_SETF);
+	} else if (specific->front_sensor_id == SENSOR_NAME_S5K3P8SP) {
+		snprintf(finfo->load_setfile_name, sizeof(FIMC_IS_3P8SP_SETF), "%s", FIMC_IS_3P8SP_SETF);
 	} else {
 		snprintf(finfo->load_setfile_name, sizeof(FIMC_IS_2X5_SETF), "%s", FIMC_IS_2X5_SETF);
 	}
@@ -2659,13 +2795,8 @@ int fimc_is_sec_write_phone_firmware(int id)
 		goto read_phone_fw_exit;
 	}
 
-#ifdef USE_BINARY_PADDING_DATA_ADDED
-	strncpy(phone_fw_version, temp_buf + nread - (FIMC_IS_HEADER_VER_SIZE + FIMC_IS_SIGNATURE_SIZE), FIMC_IS_HEADER_VER_SIZE);
-	strncpy(sysfs_pinfo[id].header_ver, temp_buf + nread - (FIMC_IS_HEADER_VER_SIZE + FIMC_IS_SIGNATURE_SIZE), FIMC_IS_HEADER_VER_SIZE);
-#else
-	strncpy(phone_fw_version, temp_buf + nread - FIMC_IS_HEADER_VER_SIZE, FIMC_IS_HEADER_VER_SIZE);
-	strncpy(sysfs_pinfo[id].header_ver, temp_buf + nread - FIMC_IS_HEADER_VER_SIZE, FIMC_IS_HEADER_VER_SIZE);
-#endif
+	strncpy(phone_fw_version, temp_buf + nread - (FIMC_IS_HEADER_VER_SIZE + IS_SIGNATURE_LEN), FIMC_IS_HEADER_VER_SIZE);
+	strncpy(sysfs_pinfo[id].header_ver, temp_buf + nread - (FIMC_IS_HEADER_VER_SIZE + IS_SIGNATURE_LEN), FIMC_IS_HEADER_VER_SIZE);
 	info("Camera[%d]: phone fw version: %s\n", id, phone_fw_version);
 
 read_phone_fw_exit:
@@ -2687,19 +2818,95 @@ read_phone_fw_exit:
 
 int fimc_is_get_dual_cal_buf(int slave_position, char **buf, int *size)
 {
+	int ret = -1;
 	char *cal_buf;
 	u32 rom_dual_cal_start_addr;
 	u32 rom_dual_cal_size;
 	struct fimc_is_core *core = (struct fimc_is_core *)dev_get_drvdata(fimc_is_dev);
 	struct fimc_is_vender_specific *specific = core->vender.private_data;
+	const struct fimc_is_vender_rom_addr *rom_addr = NULL;
 
-	fimc_is_sec_get_cal_buf(SENSOR_POSITION_REAR, &cal_buf);
+	ret = fimc_is_sec_get_cal_buf(SENSOR_POSITION_REAR, &cal_buf);
+	if (ret < 0) {
+		err("[%s]: get_cal_buf fail", __func__);
+		return ret;
+	}
 
-	rom_dual_cal_start_addr = specific->rom_cal_map_addr[SENSOR_POSITION_REAR]->rom_dual_cal_data2_start_addr;
-	rom_dual_cal_size = specific->rom_cal_map_addr[SENSOR_POSITION_REAR]->rom_dual_cal_data2_size;
+	rom_addr = specific->rom_cal_map_addr[SENSOR_POSITION_REAR];
+	if (rom_addr == NULL) {
+		err("[%s]: rom_cal_map is NULL\n", __func__);
+		return -EINVAL;
+	}
 
-	*buf = &cal_buf[rom_dual_cal_start_addr];
+	rom_dual_cal_start_addr = rom_addr->rom_dual_cal_data2_start_addr;
+	rom_dual_cal_size       = rom_addr->rom_dual_cal_data2_size;
+
+	*buf  = &cal_buf[rom_dual_cal_start_addr];
 	*size = rom_dual_cal_size;
+
+	return 0;
+}
+
+int fimc_is_get_remosaic_cal_buf(int slave_position, char **buf, int *size)
+{
+	int ret = -1;
+	char *cal_buf;
+	u32 start_addr, end_addr;
+	u32 cal_size = 0;
+
+	struct fimc_is_rom_info *finfo;
+
+#ifdef DEBUG_XTALK_CAL_SIZE
+	struct fimc_is_core *core = (struct fimc_is_core *)dev_get_drvdata(fimc_is_dev);
+	struct fimc_is_vender_specific *specific = core->vender.private_data;
+	const struct fimc_is_vender_rom_addr *rom_addr = NULL;
+#endif
+#ifdef REAR_XTALK_CAL_DATA_SIZE
+	if (slave_position == SENSOR_POSITION_REAR)
+		cal_size = REAR_XTALK_CAL_DATA_SIZE;
+#endif
+#ifdef FRONT_XTALK_CAL_DATA_SIZE
+	if (slave_position == SENSOR_POSITION_FRONT)
+		cal_size = FRONT_XTALK_CAL_DATA_SIZE;
+#endif
+
+	if (cal_size == 0)
+		return ret;
+
+	ret = fimc_is_sec_get_cal_buf(slave_position, &cal_buf);
+	if (ret < 0) {
+		err("[%s]: get_cal_buf fail", __func__);
+		return ret;
+	}
+
+	ret = fimc_is_sec_get_sysfs_finfo_by_position(slave_position, &finfo);
+	if (ret < 0) {
+		err("[%s]: get_sysfs_finfo fail", __func__);
+		return -EINVAL;
+	}
+
+	start_addr = finfo->sensor_cal_data_start_addr;
+	end_addr = finfo->sensor_cal_data_end_addr;
+
+#ifdef DEBUG_XTALK_CAL_SIZE
+	rom_addr = specific->rom_cal_map_addr[slave_position];
+	if (rom_addr == NULL) {
+		err("[%s]: rom_cal_map is NULL\n", __func__);
+		return -EINVAL;
+	}
+
+	info("[%s]: start_addr(0x%08X) end_addr(0x%08X) cal_size(%d) checksum(%d)\n",
+		__func__, start_addr, end_addr, cal_size, rom_addr->rom_sensor_cal_checksum_len);
+#endif
+
+	if (start_addr < 0 || cal_size <= 0 || end_addr < (start_addr + cal_size)) {
+		err("[%s]: invalid start_addr(0x%08X) end_addr(0x%08X) cal_size(%d) \n",
+			__func__, start_addr, end_addr, cal_size);
+		return -EINVAL;
+	}
+
+	*buf  = &cal_buf[start_addr];
+	*size = cal_size;
 
 	return 0;
 }
@@ -2883,3 +3090,27 @@ void remove_dump_fw_file(void)
 	is_dumped_fw_loading_needed = false;
 }
 
+#ifdef VENDER_CAL_STRUCT_VER2
+static void *fimc_is_sec_search_rom_extend_data(const struct rom_extend_cal_addr *extend_data, char *name)
+{
+	void *ret = NULL;
+
+	const struct rom_extend_cal_addr *cur;
+	cur = extend_data;
+
+	while (cur != NULL) {
+		if (!strcmp(cur->name, name)) {
+			if (cur->data != NULL) {
+				ret = (void *)cur->data;
+			} else {
+				warn("[%s] : Found -> %s, but no data \n", __func__, cur->name);
+				ret = NULL;
+			}
+			break;
+		}
+		cur = cur->next;
+	}
+
+	return ret;
+}
+#endif

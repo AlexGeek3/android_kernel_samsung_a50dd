@@ -32,7 +32,7 @@
 #include <linux/wakelock.h>
 #include <asm/unaligned.h>
 #include <linux/regulator/consumer.h>
-#include <linux/sec_sysfs.h>
+#include <linux/sec_class.h>
 #include <linux/pinctrl/consumer.h>
 #if defined(CONFIG_MUIC_NOTIFIER)
 #include <linux/muic/muic.h>
@@ -117,6 +117,8 @@ struct a96t3x6_data {
 };
 
 static void a96t3x6_reset(struct a96t3x6_data *data);
+static void a96t3x6_check_first_status(struct a96t3x6_data *data, int enable);
+
 
 static int a96t3x6_i2c_read(struct i2c_client *client,
 		u8 reg, u8 *val, unsigned int len)
@@ -242,6 +244,9 @@ static void a96t3x6_set_enable(struct a96t3x6_data *data, int enable, bool force
 		ret = a96t3x6_i2c_write(data->client, REG_SAR_ENABLE, &cmd);
 		if (ret < 0)
 			SENSOR_ERR("failed to enable grip irq\n");
+
+		a96t3x6_check_first_status(data, enable);
+		
 		enable_irq(data->irq);
 		enable_irq_wake(data->irq);
 		data->irq_en_cnt++;
@@ -359,19 +364,6 @@ static void a96t3x6_reset(struct a96t3x6_data *data)
 	SENSOR_INFO("done\n");
 }
 
-static void a96t3x6_grip_sw_reset(struct a96t3x6_data *data)
-{
-	int ret;
-	u8 cmd = CMD_SW_RESET;
-
-	SENSOR_INFO("\n");
-	ret = a96t3x6_i2c_write(data->client, REG_SW_RESET, &cmd);
-	if (ret < 0)
-		SENSOR_ERR("fail(%d)\n", ret);
-	else
-		usleep_range(35000, 35000);
-}
-
 static void a96t3x6_diff_getdata(struct a96t3x6_data *data)
 {
 	int ret;
@@ -389,6 +381,74 @@ static void a96t3x6_diff_getdata(struct a96t3x6_data *data)
 	data->diff = (r_buf[0] << 8) | r_buf[1];
 	data->diff_d = (r_buf[2] << 8) | r_buf[3];
 	SENSOR_INFO("%u\n", data->diff);
+}
+
+static void a96t3x6_check_first_status(struct a96t3x6_data *data, int enable)
+{
+	u8 r_buf[2];
+	u16 grip_thd;
+	
+	if (data->skip_event == true) {
+		SENSOR_INFO("skip event..\n");
+		return;
+	}
+
+	a96t3x6_i2c_read(data->client, REG_SAR_THRESHOLD, r_buf, 4);
+	grip_thd = (r_buf[0] << 8) | r_buf[1];
+
+	a96t3x6_diff_getdata(data);
+
+	if (grip_thd < data->diff) {
+		input_report_rel(data->input_dev, REL_MISC, 1);
+	} else {
+		input_report_rel(data->input_dev, REL_MISC, 2);
+	}
+
+	input_sync(data->input_dev);
+}
+
+static void a96t3x6_check_diff_and_cap(struct a96t3x6_data *data)
+{
+	u8 r_buf[2] = {0,0};
+	u8 cmd = 0x20;
+	int ret;
+	int value = 0;
+
+	ret = a96t3x6_i2c_write(data->client, REG_SAR_TOTALCAP, &cmd);
+	if (ret < 0)
+		SENSOR_ERR("write fail(%d)\n", ret);
+
+	usleep_range(20, 20);
+
+	ret = a96t3x6_i2c_read(data->client, REG_SAR_TOTALCAP_READ, r_buf, 2);
+	if (ret < 0)
+		SENSOR_ERR("fail(%d)\n", ret);
+
+	value = (r_buf[0] << 8) | r_buf[1];
+	SENSOR_INFO("Cap Read %d\n", value);
+
+    a96t3x6_diff_getdata(data);
+}
+
+
+
+static void a96t3x6_grip_sw_reset(struct a96t3x6_data *data)
+{
+	int ret, retry = 3;
+	u8 cmd = CMD_SW_RESET;
+
+	SENSOR_INFO("\n");
+
+	while (retry--) {
+        a96t3x6_check_diff_and_cap(data);
+		usleep_range(10000, 10000);
+	}
+
+	ret = a96t3x6_i2c_write(data->client, REG_SW_RESET, &cmd);
+	if (ret < 0)
+		SENSOR_ERR("fail(%d)\n", ret);
+	else
+		usleep_range(35000, 35000);
 }
 
 static int a96t3x6_get_hallic_state(struct a96t3x6_data *data)
@@ -544,6 +604,27 @@ static irqreturn_t a96t3x6_interrupt(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
+static int a96t3x6_get_raw_data(struct a96t3x6_data *data)
+{
+	int ret;
+	u8 r_buf[4] = {0,};
+
+	ret = a96t3x6_i2c_read(data->client, REG_SAR_RAWDATA, r_buf, 4);
+	if (ret < 0) {
+		SENSOR_ERR("fail(%d)\n", ret);
+		data->grip_raw = 0;
+		data->grip_raw_d = 0;
+		return ret;
+	}
+
+	data->grip_raw = (r_buf[0] << 8) | r_buf[1];
+	data->grip_raw_d = (r_buf[2] << 8) | r_buf[3];
+
+	SENSOR_INFO("grip_raw = %d\n", data->grip_raw);
+
+	return ret;
+}
+
 static ssize_t grip_sar_enable_show(struct device *dev,
 			struct device_attribute *attr, char *buf)
 {
@@ -683,20 +764,13 @@ static ssize_t grip_raw_show(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
 	struct a96t3x6_data *data = dev_get_drvdata(dev);
-	u8 r_buf[4];
 	int ret;
 
-	ret = a96t3x6_i2c_read(data->client, REG_SAR_RAWDATA, r_buf, 4);
-	if (ret < 0) {
-		SENSOR_ERR("fail(%d)\n", ret);
-		data->grip_raw = 0;
-		data->grip_raw_d = 0;
-		return snprintf(buf, PAGE_SIZE, "%d\n", 0);
-	}
-	data->grip_raw = (r_buf[0] << 8) | r_buf[1];
-	data->grip_raw_d = (r_buf[2] << 8) | r_buf[3];
-
-	return sprintf(buf, "%u,%u\n", data->grip_raw,
+	ret = a96t3x6_get_raw_data(data);
+	if (ret < 0)
+		return sprintf(buf, "%d\n", 0);
+	else
+		return sprintf(buf, "%u,%u\n", data->grip_raw,
 			data->grip_raw_d);
 }
 
@@ -711,7 +785,37 @@ static ssize_t grip_check_show(struct device *dev,
 {
 	struct a96t3x6_data *data = dev_get_drvdata(dev);
 
+	a96t3x6_diff_getdata(data);
+
 	return snprintf(buf, PAGE_SIZE, "%d\n", data->grip_event);
+}
+
+static ssize_t grip_sw_reset_ready_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct a96t3x6_data *data = dev_get_drvdata(dev);
+	int ret;
+	int retry = 10;
+	u8 r_buf[1] = {0};
+
+	SENSOR_INFO("Wait start\n");
+
+	/* To garuantee grip sensor sw reset delay*/
+	msleep(500);
+
+	while (retry--) {
+		ret = a96t3x6_i2c_read(data->client, REG_SW_RESET, r_buf, 1);
+		if (r_buf[0] == 0x20)
+			break;
+		if (ret < 0)
+			SENSOR_ERR("failed(%d)\n", retry);
+		msleep(100);
+	}
+
+	SENSOR_INFO("expect 0x20 read 0x%x\n", r_buf[0]);
+	a96t3x6_check_diff_and_cap(data);
+
+	return snprintf(buf, PAGE_SIZE, "1\n");
 }
 
 static ssize_t grip_sw_reset(struct device *dev,
@@ -1241,6 +1345,7 @@ static int a96t3x6_fw_update(struct a96t3x6_data *data, u8 cmd)
 {
 	int ret, i = 0;
 	int count;
+	int retry = 5;
 	unsigned short address;
 	unsigned char addrH, addrL;
 	unsigned char buf[32] = {0, };
@@ -1250,14 +1355,24 @@ static int a96t3x6_fw_update(struct a96t3x6_data *data, u8 cmd)
 	count = data->firm_size / 32;
 	address = 0x800;
 
-	a96t3x6_reset_for_bootmode(data);
-	usleep_range(BOOT_DELAY, BOOT_DELAY);
+	while(retry > 0) {
+		a96t3x6_reset_for_bootmode(data);
+		usleep_range(BOOT_DELAY, BOOT_DELAY);
 
-	ret = a96t3x6_fw_mode_enter(data);
-	if (ret < 0) {
+		ret = a96t3x6_fw_mode_enter(data);
+		if (ret < 0)
+			SENSOR_ERR("a96t3x6_fw_mode_enter fail, retry : %d\n", i);
+		else
+			break;
+		
+		retry--;
+	}
+	
+	if(ret < 0 && retry == 0) {
 		SENSOR_ERR("a96t3x6_fw_mode_enter fail\n");
 		return ret;
 	}
+	
 	usleep_range(5000, 5000);
 	SENSOR_INFO("fw_mode_cmd sent\n");
 
@@ -1425,6 +1540,15 @@ static ssize_t grip_fw_update(struct device *dev,
 	}
 	ret = a96t3x6_flash_fw(data, false, cmd);
 
+	if (data->current_state) {
+		cmd = CMD_ON;
+		ret = a96t3x6_i2c_write(data->client, REG_SAR_ENABLE, &cmd);
+		if (ret < 0)
+			SENSOR_INFO("failed to enable grip irq\n");
+
+		a96t3x6_check_first_status(data, 1);
+	}
+
 	data->enabled = true;
 	enable_irq(data->irq);
 	if (ret) {
@@ -1488,7 +1612,7 @@ static ssize_t grip_reg_show(struct device *dev,
 	int offset = 0, i = 0;
 	struct a96t3x6_data *data = dev_get_drvdata(dev);
 
-	for (i = 0; i < 255; i++) {
+	for (i = 0; i < 128; i++) {
 		a96t3x6_i2c_read(data->client, i, &val, 1);
 		SENSOR_INFO("%s: reg=%02X val=%02X\n", __func__, i, val);
 		
@@ -1562,6 +1686,7 @@ static DEVICE_ATTR(grip_threshold, 0444, grip_threshold_show, NULL);
 static DEVICE_ATTR(grip_total_cap, 0444, grip_total_cap_show, NULL);
 static DEVICE_ATTR(grip_sar_enable, 0664, grip_sar_enable_show,
 			grip_sar_enable_store);
+static DEVICE_ATTR(grip_sw_reset_ready, 0444, grip_sw_reset_ready_show, NULL);
 static DEVICE_ATTR(grip_sw_reset, 0220, NULL, grip_sw_reset);
 static DEVICE_ATTR(grip_earjack, 0220, NULL, grip_sensing_change);
 static DEVICE_ATTR(grip, 0444, grip_show, NULL);
@@ -1596,6 +1721,7 @@ static struct device_attribute *grip_sensor_attributes[] = {
 	&dev_attr_grip_total_cap,
 	&dev_attr_grip_sar_enable,
 	&dev_attr_grip_sw_reset,
+	&dev_attr_grip_sw_reset_ready,
 	&dev_attr_grip_earjack,
 	&dev_attr_grip,
 	&dev_attr_grip_baseline,
@@ -1813,6 +1939,7 @@ static int a96t3x6_ccic_handle_notification(struct notifier_block *nb,
 	case NOTIFY_CABLE_USB:
 	case NOTIFY_CABLE_TA_FAC:
 	case NOTIFY_CABLE_OTG:
+	case NOTIFY_CABLE_TA_MUIC:
 		if (usb_typec_info.attach == MUIC_NOTIFY_CMD_ATTACH) {
 			cmd = CMD_OFF;
 			a96t3x6_i2c_write(grip_data->client, REG_TSPTA, &cmd);
@@ -1990,7 +2117,7 @@ static int a96t3x6_probe(struct i2c_client *client,
 
 #if defined(CONFIG_USB_TYPEC_MANAGER_NOTIFIER) && defined(CONFIG_CCIC_NOTIFIER)
 	manager_notifier_register(&data->cpuidle_ccic_nb,
-		a96t3x6_ccic_handle_notification, MANAGER_NOTIFY_CCIC_BATTERY);
+		a96t3x6_ccic_handle_notification, MANAGER_NOTIFY_CCIC_SENSORHUB);
 #elif defined(CONFIG_MUIC_NOTIFIER)
 	muic_notifier_register(&data->cpuidle_muic_nb,
 		a96t3x6_cpuidle_muic_notifier, MUIC_NOTIFY_DEV_CPUIDLE);

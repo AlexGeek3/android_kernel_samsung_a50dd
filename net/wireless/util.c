@@ -250,15 +250,7 @@ int cfg80211_validate_key_settings(struct cfg80211_registered_device *rdev,
 		/* Disallow BIP (group-only) cipher as pairwise cipher */
 		if (pairwise)
 			return -EINVAL;
-/* Some APs sent wrong key_idx like 1280(0x0500), wpa_supplicant send key_idx to 0 and it can make connection drop in follow cases. <P180111-00936>, <P190104-04363>
-		if (key_idx < 4)
-			return -EINVAL;
-*/
 		break;
-	case WLAN_CIPHER_SUITE_WEP40:
-	case WLAN_CIPHER_SUITE_WEP104:
-		if (key_idx > 3)
-			return -EINVAL;
 	default:
 		break;
 	}
@@ -1451,7 +1443,7 @@ bool ieee80211_chandef_to_operating_class(struct cfg80211_chan_def *chandef,
 					  u8 *op_class)
 {
 	u8 vht_opclass;
-	u16 freq = chandef->center_freq1;
+	u32 freq = chandef->center_freq1;
 
 	if (freq >= 2412 && freq <= 2472) {
 		if (chandef->width > NL80211_CHAN_WIDTH_40)

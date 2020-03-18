@@ -18,8 +18,19 @@ config SENSORS_SSP_PROXIMITY_STK3X3X
 	default n
 	depends on SPI
 	help
-	  proximity tmd3725 file for factory test in ssp driver.
+	  proximity stk3x3x file for factory test in ssp driver.
           If you say yes here you get proximity stk3x3x support for
+	  factory test.
+	  To compile this driver as a module, choose M here: the
+	  module will be called ssp.
+
+config SENSORS_SSP_PROXIMITY_GP2AP110S
+	tristate "Sensors ssp proximity gp2ap110s"
+	default n
+	depends on SPI
+	help
+	  proximity gp2ap110s file for factory test in ssp driver.
+          If you say yes here you get proximity gp2ap110s support for
 	  factory test.
 	  To compile this driver as a module, choose M here: the
 	  module will be called ssp.

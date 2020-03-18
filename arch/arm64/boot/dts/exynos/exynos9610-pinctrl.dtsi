@@ -238,7 +238,8 @@
 			interrupt-controller;
 			#interrupt-cells = <3>;
 			interrupt-parent = <&gic>;
-			interrupts = <0 196 0>;
+			/* Move to model common dt file. */ 
+			/*interrupts = <0 196 0>; */
 		};
 
 		gpm16: gpm16 {
@@ -315,7 +316,8 @@
 			interrupt-controller;
 			#interrupt-cells = <3>;
 			interrupt-parent = <&gic>;
-			interrupts = <0 278 0>;
+			/* Move to model common dt file. */ 
+			/*interrupts = <0 278 0>;*/
 		};
 
 		gpm24: gpm24 {
@@ -325,7 +327,8 @@
 			interrupt-controller;
 			#interrupt-cells = <3>;
 			interrupt-parent = <&gic>;
-			interrupts = <0 318 0>;
+			/* Move to model common dt file. */
+			/*interrupts = <0 318 0>;*/
 		};
 
 		gpm25: gpm25 {
@@ -335,7 +338,8 @@
 			interrupt-controller;
 			#interrupt-cells = <3>;
 			interrupt-parent = <&gic>;
-			interrupts = <0 319 0>;
+			/* Move to model common dt file. */ 
+			/*interrupts = <0 319 0>;*/
 		};
 
 		/* USI_0_CMGP */
@@ -737,25 +741,39 @@
 			samsung,pin-drv = <0>;
 		};
 
-		sd0_clk_fast_slew_rate_2x: sd0-clk_fast_slew_rate_2x {
+		sd0_clk_fast_slew_rate_1_5x: sd0-clk_fast_slew_rate_1_5x {
 			samsung,pins = "gpf0-0";
 			samsung,pin-function = <2>;
 			samsung,pin-pud = <0>;
 			samsung,pin-drv = <1>;
 		};
 
-		sd0_clk_fast_slew_rate_3x: sd0-clk_fast_slew_rate_3x {
+		sd0_clk_fast_slew_rate_2x: sd0-clk_fast_slew_rate_2x {
 			samsung,pins = "gpf0-0";
 			samsung,pin-function = <2>;
 			samsung,pin-pud = <0>;
 			samsung,pin-drv = <2>;
 		};
 
-		sd0_clk_fast_slew_rate_4x: sd0-clk_fast_slew_rate_4x {
+		sd0_clk_fast_slew_rate_2_5x: sd0-clk_fast_slew_rate_2_5x {
 			samsung,pins = "gpf0-0";
 			samsung,pin-function = <2>;
 			samsung,pin-pud = <0>;
 			samsung,pin-drv = <3>;
+		};
+
+		sd0_clk_fast_slew_rate_3x: sd0-clk_fast_slew_rate_3x {
+			samsung,pins = "gpf0-0";
+			samsung,pin-function = <2>;
+			samsung,pin-pud = <0>;
+			samsung,pin-drv = <4>;
+		};
+
+		sd0_clk_fast_slew_rate_4x: sd0-clk_fast_slew_rate_4x {
+			samsung,pins = "gpf0-0";
+			samsung,pin-function = <2>;
+			samsung,pin-pud = <0>;
+			samsung,pin-drv = <5>;
 		};
 
 		sd0_bus1: sd0-bus-width1 {
@@ -783,28 +801,28 @@
 			samsung,pins = "gpf2-0";
 			samsung,pin-function = <2>;
 			samsung,pin-pud = <0>;
-			samsung,pin-drv = <2>;
+			samsung,pin-drv = <4>;
 		};
 
 		sd2_cmd: sd2-cmd {
 			samsung,pins = "gpf2-1";
 			samsung,pin-function = <2>;
 			samsung,pin-pud = <3>;
-			samsung,pin-drv = <2>;
+			samsung,pin-drv = <4>;
 		};
 
 		sd2_bus1: sd2-bus-width1 {
 			samsung,pins = "gpf2-2";
 			samsung,pin-function = <2>;
 			samsung,pin-pud = <3>;
-			samsung,pin-drv = <2>;
+			samsung,pin-drv = <4>;
 		};
 
 		sd2_bus4: sd2-bus-width4 {
 			samsung,pins = "gpf2-3", "gpf2-4", "gpf2-5";
 			samsung,pin-function = <2>;
 			samsung,pin-pud = <3>;
-			samsung,pin-drv = <2>;
+			samsung,pin-drv = <4>;
 		};
 
 		sd2_clk_fast_slew_rate_1x: sd2-clk_fast_slew_rate_1x {
@@ -818,21 +836,21 @@
 			samsung,pins = "gpf2-0";
 			samsung,pin-function = <2>;
 			samsung,pin-pud = <0>;
-			samsung,pin-drv = <1>;
+			samsung,pin-drv = <2>;
 		};
 
 		sd2_clk_fast_slew_rate_3x: sd2-clk_fast_slew_rate_3x {
 			samsung,pins = "gpf2-0";
 			samsung,pin-function = <2>;
 			samsung,pin-pud = <0>;
-			samsung,pin-drv = <2>;
+			samsung,pin-drv = <4>;
 		};
 
 		sd2_clk_fast_slew_rate_4x: sd2-clk_fast_slew_rate_4x {
 			samsung,pins = "gpf2-0";
 			samsung,pin-function = <2>;
 			samsung,pin-pud = <0>;
-			samsung,pin-drv = <3>;
+			samsung,pin-drv = <6>;
 		};
 	};
 

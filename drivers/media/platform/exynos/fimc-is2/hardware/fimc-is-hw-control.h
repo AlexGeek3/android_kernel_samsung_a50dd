@@ -278,7 +278,6 @@ struct fimc_is_hw_ip {
 	struct hw_ip_status			status;
 	atomic_t				fcount;
 	atomic_t				instance;
-	u32					internal_fcount;
 	void __iomem				*regs;
 	resource_size_t				regs_start;
 	resource_size_t				regs_end;
@@ -290,6 +289,7 @@ struct fimc_is_hw_ip {
 	struct is_region			*region[FIMC_IS_STREAM_COUNT];
 	u32					hindex[FIMC_IS_STREAM_COUNT];
 	u32					lindex[FIMC_IS_STREAM_COUNT];
+	u32					internal_fcount[FIMC_IS_STREAM_COUNT];
 	struct fimc_is_framemgr			*framemgr;
 	struct fimc_is_framemgr			*framemgr_late;
 	struct fimc_is_hardware			*hardware;
@@ -397,7 +397,7 @@ struct fimc_is_hardware {
 
 #define framemgr_e_barrier_common(this, index, flag)		\
 	do {							\
-		if (in_interrupt()) {				\
+		if (in_irq()) {					\
 			framemgr_e_barrier(this, index);	\
 		} else {						\
 			framemgr_e_barrier_irqs(this, index, flag);	\
@@ -406,7 +406,7 @@ struct fimc_is_hardware {
 
 #define framemgr_x_barrier_common(this, index, flag)		\
 	do {							\
-		if (in_interrupt()) {				\
+		if (in_irq()) {					\
 			framemgr_x_barrier(this, index);	\
 		} else {						\
 			framemgr_x_barrier_irqr(this, index, flag);	\

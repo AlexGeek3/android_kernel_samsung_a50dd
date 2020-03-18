@@ -7,7 +7,7 @@
  * (at your option) any later version.
  */
 
-  /* usb notify layer v3.2 */
+  /* usb notify layer v3.3 */
 
 #ifndef __LINUX_USBLOG_PROC_NOTIFY_H__
 #define __LINUX_USBLOG_PROC_NOTIFY_H__
@@ -21,6 +21,9 @@ enum usblog_type {
 	NOTIFY_USBMODE_EXTRA,
 	NOTIFY_USBSTATE,
 	NOTIFY_EVENT,
+	NOTIFY_PORT_CONNECT,
+	NOTIFY_PORT_DISCONNECT,
+	NOTIFY_PORT_CLASS,
 	NOTIFY_EXTRA,
 };
 
@@ -58,6 +61,10 @@ enum usblog_status {
 	NOTIFY_ATTACH_DRP,
 };
 
+/*
+	You should refer "linux/ccic/ccic_notifier.h"
+	ccic_device, ccic_id may be different at each branch
+*/
 enum ccic_device {
 	NOTIFY_DEV_INITIAL = 0,
 	NOTIFY_DEV_USB,
@@ -80,6 +87,8 @@ enum ccic_id {
 	NOTIFY_ID_POWER_STATUS,
 	NOTIFY_ID_WATER,
 	NOTIFY_ID_VCONN,
+	NOTIFY_ID_OTG,
+	NOTIFY_ID_TA,
 	NOTIFY_ID_DP_CONNECT,
 	NOTIFY_ID_DP_HPD,
 	NOTIFY_ID_DP_LINK_CONF,
@@ -87,6 +96,7 @@ enum ccic_id {
 	NOTIFY_ID_ROLE_SWAP,
 	NOTIFY_ID_FAC,
 	NOTIFY_ID_CC_PIN_STATUS,
+	NOTIFY_ID_WATER_CABLE,
 };
 
 enum ccic_rid {
@@ -151,6 +161,8 @@ enum extra {
 	NOTIFY_EXTRA_SYSMSG_SBU_GND_SHORT,
 	NOTIFY_EXTRA_SYSMSG_SBU_VBUS_SHORT,
 	NOTIFY_EXTRA_UVDM_TIMEOUT,
+	NOTIFY_EXTRA_CCOPEN_REQ_SET,
+	NOTIFY_EXTRA_CCOPEN_REQ_CLEAR,
 };
 
 #define ALTERNATE_MODE_NOT_READY	(1 << 0)
@@ -160,19 +172,22 @@ enum extra {
 #define ALTERNATE_MODE_RESET		(1 << 4)
 
 #ifdef CONFIG_USB_NOTIFY_PROC_LOG
-extern void store_usblog_notify(int type, void *param1, void *parma2);
+extern void store_usblog_notify(int type, void *param1, void *param2);
 extern void store_ccic_version(unsigned char *hw, unsigned char *sw_main,
 			unsigned char *sw_boot);
 extern void store_ccic_bin_version(const unsigned char *sw_main,
 					const unsigned char *sw_boot);
+extern unsigned long long show_ccic_version(void);
 extern int register_usblog_proc(void);
 extern void unregister_usblog_proc(void);
 #else
-static inline void store_usblog_notify(int type, void *param1, void *parma2) {}
+static inline void store_usblog_notify(int type, void *param1, void *param2) {}
 static inline void store_ccic_version(unsigned char *hw, unsigned char *sw_main,
 			unsigned char *sw_boot) {}
 static inline void store_ccic_bin_version(const unsigned char *sw_main,
 			const unsigned char *sw_boot) {}
+static inline unsigned long long show_ccic_version(void)
+			{return 0; }
 static inline int register_usblog_proc(void)
 			{return 0; }
 static inline void unregister_usblog_proc(void) {}

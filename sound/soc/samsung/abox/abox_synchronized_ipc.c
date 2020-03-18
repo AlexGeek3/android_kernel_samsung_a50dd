@@ -53,7 +53,7 @@ pr_err("[SYNC_IPC] %s: " format "\n", __func__, ## args)
 static DECLARE_WAIT_QUEUE_HEAD(wq_read);
 static DECLARE_WAIT_QUEUE_HEAD(wq_write);
 
-struct abox_platform_data *data;
+static struct abox_platform_data *data;
 char *tfadrv_read_buf = NULL;
 char *tfadrv_write_buf = NULL;
 char *smem_write_buf = NULL;

@@ -29,6 +29,8 @@
 #include <linux/sched.h>
 #include <linux/freezer.h>
 
+#define __FS_HAS_ENCRYPTION IS_ENABLED(CONFIG_FSCRYPT_SDP)
+#include <linux/fscrypt.h>
 #ifdef CONFIG_FSCRYPT_SDP
 #include <sdp/fs_request.h>
 #endif
@@ -37,8 +39,6 @@
 
 #define TIMEOUT_PENDING_REQ (5*1000)
 
-extern int fscrypt_inline_encrypted(const struct inode *inode);
-extern int fscrypt_set_bio_cryptd(const struct inode *inode, struct bio *bio);
 #ifdef CONFIG_FSCRYPT_SDP
 extern int fscrypt_sdp_get_storage_type(struct dentry *target_dentry);
 #endif

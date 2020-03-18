@@ -43,6 +43,9 @@ struct mxproc           *scsc_mx_get_mxproc(struct scsc_mx *mx);
 struct mxmgmt_transport *scsc_mx_get_mxmgmt_transport(struct scsc_mx *mx);
 struct gdb_transport    *scsc_mx_get_gdb_transport_r4(struct scsc_mx *mx);
 struct gdb_transport    *scsc_mx_get_gdb_transport_m4(struct scsc_mx *mx);
+#ifdef CONFIG_SCSC_MX450_GDB_SUPPORT
+struct gdb_transport    *scsc_mx_get_gdb_transport_m4_1(struct scsc_mx *mx);
+#endif
 struct mxlog            *scsc_mx_get_mxlog(struct scsc_mx *mx);
 struct mxlog_transport  *scsc_mx_get_mxlog_transport(struct scsc_mx *mx);
 struct mxlogger         *scsc_mx_get_mxlogger(struct scsc_mx *mx);

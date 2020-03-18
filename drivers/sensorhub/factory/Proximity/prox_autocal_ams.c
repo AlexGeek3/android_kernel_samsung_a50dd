@@ -15,19 +15,16 @@
 u16 get_proximity_ams_auto_cal_raw_data(struct ssp_data *data)
 {
 	u16 uRowdata = 0;
-	char chTempbuf[8] = { 0, };
-
-	s32 dMsDelay = 20;
-	memcpy(&chTempbuf[0], &dMsDelay, 4);
-
+	
 	if (data->is_proxraw_enabled == false) {
-                data->is_proxraw_enabled = true;
-		make_command(data, ADD_SENSOR, SENSOR_TYPE_PROXIMITY_RAW, chTempbuf, 8);
+        data->is_proxraw_enabled = true;
+		set_delay_legacy_sensor(data, SENSOR_TYPE_PROXIMITY_RAW, 20, 0);
+		enable_legacy_sensor(data, SENSOR_TYPE_PROXIMITY_RAW);
+				
 		msleep(200);
 		uRowdata = data->buf[SENSOR_TYPE_PROXIMITY_RAW].prox_raw[0];
                 data->is_proxraw_enabled = false;
-		make_command(data, REMOVE_SENSOR, SENSOR_TYPE_PROXIMITY_RAW,
-		             chTempbuf, 4);
+		disable_legacy_sensor(data, SENSOR_TYPE_PROXIMITY_RAW);
 	} else {
 		uRowdata = data->buf[SENSOR_TYPE_PROXIMITY_RAW].prox_raw[0];
 	}
@@ -317,12 +314,8 @@ ssize_t get_proximity_ams_avg_raw_data(struct ssp_data *data, char *buf)
 ssize_t set_proximity_ams_avg_raw_data(struct ssp_data *data,
                                            const char *buf)
 {
-	char chTempbuf[8] = { 0, };
 	int ret;
 	int64_t dEnable;
-
-	s32 dMsDelay = 20;
-	memcpy(&chTempbuf[0], &dMsDelay, 4);
 
 	ret = kstrtoll(buf, 10, &dEnable);
 	if (ret < 0) {
@@ -332,72 +325,19 @@ ssize_t set_proximity_ams_avg_raw_data(struct ssp_data *data,
 	if (dEnable) {
 		if(!data->is_proxraw_enabled) {
 			data->is_proxraw_enabled = true;			
-			make_command(data, ADD_SENSOR, SENSOR_TYPE_PROXIMITY_RAW, chTempbuf, 8);
+
+		set_delay_legacy_sensor(data, SENSOR_TYPE_PROXIMITY_RAW, 20, 0);
+			enable_legacy_sensor(data, SENSOR_TYPE_PROXIMITY_RAW);
 		}
 	} else {
 		if(data->is_proxraw_enabled) {
 			data->is_proxraw_enabled = false;			
-			make_command(data, REMOVE_SENSOR, SENSOR_TYPE_PROXIMITY_RAW,
-			             chTempbuf, 4);
+			disable_legacy_sensor(data, SENSOR_TYPE_PROXIMITY_RAW);
 		}
 	}
 
 	return ret;
 }
-
-
-ssize_t get_proximity_ams_setting(char *buf)
-{
-	return snprintf(buf, PAGE_SIZE, "%d\n", 1);
-}
-
-ssize_t set_proximity_ams_setting(struct ssp_data *data, const char *buf)
-{
-	int ret;
-	u8 val[2] = {0, };
-	char *token;
-	char *str;
-
-	pr_info("[SSP] %s - %s\n", __func__, buf);
-
-	//parsing
-	str = (char *)buf;
-	token = strsep(&str, " \n");
-	if (token == NULL) {
-		pr_err("[SSP] %s : too few arguments (2 needed)", __func__);
-		return -EINVAL;
-	}
-
-	ret = kstrtou8(token, 10, &val[0]);
-	if (ret < 0) {
-		pr_err("[SSP] %s : kstrtou8 error %d", __func__, ret);
-		return ret;
-	}
-
-	token = strsep(&str, " \n");
-	if (token == NULL) {
-		pr_err("[SSP] %s : too few arguments (2 needed)", __func__);
-		return -EINVAL;
-	}
-
-	ret = kstrtou8(token, 16, &val[1]);
-	if (ret < 0) {
-		pr_err("[SSP] %s : kstrtou8 error %d", __func__, ret);
-		return ret;
-	}
-
-	pr_info("[SSP] %s - index = %d value = 0x%x\n", __func__, val[0], val[1]);
-
-	ret = ssp_send_command(data, CMD_SETVALUE, SENSOR_TYPE_PROXIMITY,
-	                       PROXIMITY_SETTING, 0, &val[0], 2 * sizeof(char), NULL, NULL);
-
-	if (ret != SUCCESS) {
-		ssp_errf("ssp_send_command Fail %d", ret);
-	}
-
-	return ret;
-}
-
 
 struct proximity_sensor_operations prox_ams_auto_cal_ops = {
 	.get_proximity_name = get_proximity_ams_auto_cal_name,
@@ -413,8 +353,6 @@ struct proximity_sensor_operations prox_ams_auto_cal_ops = {
 	.set_threshold_detect_low = set_ams_threshold_detect_low,
 	.get_proximity_avg_raw_data = get_proximity_ams_avg_raw_data,
 	.set_proximity_avg_raw_data = set_proximity_ams_avg_raw_data,
-	.get_proximity_setting = get_proximity_ams_setting,
-	.set_proximity_setting = set_proximity_ams_setting,
 	.get_proximity_raw_data = get_proximity_ams_auto_cal_raw_data,
 	.get_proximity_trim_value = get_proximity_ams_trim_value,
 	.get_proximity_trim_check = get_proximity_ams_trim_check,

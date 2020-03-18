@@ -355,7 +355,7 @@ static int vipx_context_execute_submodel(struct vipx_context *vctx,
 
 	//TODO check plane count of buffer
 	for (idx = 0; idx < num_input; ++idx) {
-		common_mem = &execute_info->input[idx][0];
+		common_mem = &execute_info->input[idx];
 		buffer[translate_count] = __vipx_context_create_buffer(vctx,
 				common_mem, DMA_TO_DEVICE);
 		if (unlikely(IS_ERR(buffer[translate_count]))) {
@@ -370,7 +370,7 @@ static int vipx_context_execute_submodel(struct vipx_context *vctx,
 
 	//TODO check plane count of buffer
 	for (idx = 0; idx < num_output; ++idx) {
-		common_mem = &execute_info->output[idx][0];
+		common_mem = &execute_info->output[idx];
 		buffer[translate_count] = __vipx_context_create_buffer(vctx,
 				common_mem, DMA_FROM_DEVICE);
 		if (unlikely(IS_ERR(buffer[translate_count]))) {

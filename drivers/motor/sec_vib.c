@@ -21,8 +21,7 @@
 #include <linux/of_gpio.h>
 #include <linux/wakelock.h>
 #include <linux/workqueue.h>
-
-#include "timed_output.h"
+#include <linux/motor/timed_output.h>
 
 #define SEC_VIB_NAME "sec_vib"
 #define INTERNAL_LDO	0

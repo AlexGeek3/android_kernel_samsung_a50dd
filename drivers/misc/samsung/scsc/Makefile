@@ -49,8 +49,10 @@ scsc_wifilogger-y += scsc_wifilogger_api.o \
 scsc_wifilogger-$(CONFIG_SCSC_WIFILOGGER_DEBUGFS) += scsc_wifilogger_debugfs.o
 scsc_wifilogger-$(CONFIG_SCSC_WIFILOGGER_TEST) += scsc_wifilogger_ring_test.o
 
-#pcie_module for static functions and registration of client modules (only core)
-#pcie_mif for instance
+# GDB channels for MoreDump
+ccflags-$(CONFIG_SCSC_MX450_GDB_SUPPORT) += -DCONFIG_SCSC_MX450_GDB_SUPPORT
+
+# PCI-E MIF
 obj-$(CONFIG_SCSC_PCIE) += scsc_pcie_mif.o
 scsc_pcie_mif-y += pcie_mif_module.o pcie_mif.o pcie_proc.o pcie_mbox.o pcie_mbox_intgen.o
 
@@ -62,7 +64,12 @@ scsc_platform_mif-$(CONFIG_SCSC_PLATFORM) += \
 ifeq ($(CONFIG_SOC_EXYNOS9610),y)
 	scsc_platform_mif-$(CONFIG_SCSC_PLATFORM) += platform_mif_9610.o
 endif
-
+ifeq ($(CONFIG_SOC_EXYNOS9630),y)
+	scsc_platform_mif-$(CONFIG_SCSC_PLATFORM) += platform_mif_9630.o
+endif
+ifeq ($(CONFIG_SOC_EXYNOS3830),y)
+	scsc_platform_mif-$(CONFIG_SCSC_PLATFORM) += platform_mif_3830.o
+endif
 ifeq ($(CONFIG_SOC_EXYNOS7570),y)
 	scsc_platform_mif-$(CONFIG_SCSC_PLATFORM) += platform_mif.o
 endif
@@ -98,6 +105,7 @@ scsc_mx-y += \
 	mxmgmt_transport.o \
 	gdb_transport.o \
 	scsc_lerna.o \
+	mxsyserr.o \
 	mxfwconfig.o \
 	mx140_file.o
 

@@ -37,7 +37,7 @@ int mifqos_add_request(struct mifqos *qos, enum scsc_service_id id, enum scsc_qo
 {
 	struct scsc_mif_abs *mif;
 	struct scsc_mifqos_request *req;
-	int ret;
+	int ret = 0;
 
 	if (!qos)
 		return -EIO;
@@ -53,7 +53,8 @@ int mifqos_add_request(struct mifqos *qos, enum scsc_service_id id, enum scsc_qo
 	mif = qos->mif;
 	req = &qos->qos_req[id];
 
-	ret = mif->mif_pm_qos_add_request(mif, req, config);
+	if (mif->mif_pm_qos_add_request)
+		ret = mif->mif_pm_qos_add_request(mif, req, config);
 	if (ret) {
 		mutex_unlock(&qos->lock);
 		return ret;
@@ -84,7 +85,11 @@ int mifqos_update_request(struct mifqos *qos, enum scsc_service_id id, enum scsc
 	req = &qos->qos_req[id];
 
 	mutex_unlock(&qos->lock);
-	return mif->mif_pm_qos_update_request(mif, req, config);
+
+	if (mif->mif_pm_qos_update_request)
+		return mif->mif_pm_qos_update_request(mif, req, config);
+	else
+		return 0;
 }
 
 int mifqos_remove_request(struct mifqos *qos, enum scsc_service_id id)
@@ -109,7 +114,11 @@ int mifqos_remove_request(struct mifqos *qos, enum scsc_service_id id)
 	qos->qos_in_use[id] = false;
 
 	mutex_unlock(&qos->lock);
-	return mif->mif_pm_qos_remove_request(mif, req);
+
+	if (mif->mif_pm_qos_remove_request)
+		return mif->mif_pm_qos_remove_request(mif, req);
+	else
+		return 0;
 }
 
 int mifqos_deinit(struct mifqos *qos)

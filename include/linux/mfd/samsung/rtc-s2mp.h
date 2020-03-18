@@ -117,6 +117,11 @@
 #define OSC_XOUT_SHIFT			2
 #define OSC_XOUT_MASK			(0x07 << OSC_XOUT_SHIFT)
 
+#if defined(CONFIG_RTC_ALARM_BOOT)
+#define RTC_WAKE_SHIFT			3
+#define RTC_WAKE_MASK			(1 << RTC_WAKE_SHIFT)
+#endif
+
 /* RTC Counter Register offsets */
 #ifdef CONFIG_RTC_DRV_S2MP
 enum {

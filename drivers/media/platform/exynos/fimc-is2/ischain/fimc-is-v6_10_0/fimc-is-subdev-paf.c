@@ -18,6 +18,54 @@
 #include "fimc-is-video.h"
 #include "fimc-is-type.h"
 
+void fimc_is_ischain_paf_stripe_cfg(struct fimc_is_subdev *subdev,
+		struct fimc_is_frame *frame,
+		struct fimc_is_crop *incrop,
+		struct fimc_is_crop *otcrop,
+		struct fimc_is_fmt *fmt)
+{
+	u32 stripe_w, dma_offset = 0;
+
+	/* Input crop & RDMA offset configuration */
+	if (!frame->stripe_info.region_id) {
+		/* Left region */
+		stripe_w = ALIGN(incrop->w / frame->stripe_info.region_num, STRIPE_WIDTH_ALIGN);
+
+		frame->stripe_info.in.h_pix_ratio = stripe_w * STRIPE_RATIO_PRECISION / incrop->w;
+		frame->stripe_info.in.h_pix_num = stripe_w;
+	} else {
+		/* Right region */
+		stripe_w = incrop->w - frame->stripe_info.in.h_pix_num;
+
+		/* Add horizontal DMA offset */
+		dma_offset = frame->stripe_info.in.h_pix_num - STRIPE_MARGIN_WIDTH;
+		dma_offset = dma_offset * fmt->bitsperpixel[0] / BITS_PER_BYTE;
+	}
+
+	/* Add stripe processing horizontal margin into each region. */
+	stripe_w += STRIPE_MARGIN_WIDTH;
+
+	incrop->w = stripe_w;
+
+	/**
+	 * Output crop configuration.
+	 * No crop & scale.
+	 */
+	otcrop->x = 0;
+	otcrop->y = 0;
+	otcrop->w = incrop->w;
+	otcrop->h = incrop->h;
+
+	frame->dvaddr_buffer[0] += dma_offset;
+
+	mdbg_pframe("stripe_in_crop[%d][%d, %d, %d, %d] offset %x\n", subdev, subdev, frame,
+			frame->stripe_info.region_id,
+			incrop->x, incrop->y, incrop->w, incrop->h, dma_offset);
+	mdbg_pframe("stripe_ot_crop[%d][%d, %d, %d, %d]\n", subdev, subdev, frame,
+			frame->stripe_info.region_id,
+			otcrop->x, otcrop->y, otcrop->w, otcrop->h);
+}
+
 static int fimc_is_ischain_paf_cfg(struct fimc_is_subdev *leader,
 	void *device_data,
 	struct fimc_is_frame *frame,
@@ -37,6 +85,7 @@ static int fimc_is_ischain_paf_cfg(struct fimc_is_subdev *leader,
 	struct fimc_is_device_ischain *device;
 	u32 hw_format = DMA_INPUT_FORMAT_BAYER;
 	u32 hw_bitwidth = DMA_INPUT_BIT_WIDTH_16BIT;
+	struct fimc_is_crop incrop_cfg, otcrop_cfg;
 
 	device = (struct fimc_is_device_ischain *)device_data;
 
@@ -49,6 +98,8 @@ static int fimc_is_ischain_paf_cfg(struct fimc_is_subdev *leader,
 	FIMC_BUG(!indexes);
 
 	group = &device->group_paf;
+	incrop_cfg = *incrop;
+	otcrop_cfg = *otcrop;
 
 	ret = fimc_is_sensor_g_module(device->sensor, &module);
 	if (ret) {
@@ -73,6 +124,11 @@ static int fimc_is_ischain_paf_cfg(struct fimc_is_subdev *leader,
 		hw_format = queue->framecfg.format->hw_format;
 		hw_bitwidth = queue->framecfg.format->hw_bitwidth; /* memory width per pixel */
 	}
+
+	if (IS_ENABLED(CHAIN_USE_STRIPE_PROCESSING) && frame && frame->stripe_info.region_num)
+		fimc_is_ischain_paf_stripe_cfg(leader, frame,
+				&incrop_cfg, &otcrop_cfg,
+				queue->framecfg.format);
 
 	/* Configure Conrtol */
 	if (!frame) {
@@ -99,16 +155,16 @@ static int fimc_is_ischain_paf_cfg(struct fimc_is_subdev *leader,
 	dma_input->msb = module->bitwidth - 1; /* msb zero padding by HW constraint */
 	dma_input->order = DMA_INPUT_ORDER_GR_BG;
 	dma_input->plane = 1;
-	dma_input->width = incrop->w;
-	dma_input->height = incrop->h;
+	dma_input->width = leader->input.width;
+	dma_input->height = leader->input.height;
 
 	dma_input->dma_crop_offset = 0;
-	dma_input->dma_crop_width = leader->input.width;
-	dma_input->dma_crop_height = leader->input.height;
-	dma_input->bayer_crop_offset_x = incrop->x;
-	dma_input->bayer_crop_offset_y = incrop->y;
-	dma_input->bayer_crop_width = incrop->w;
-	dma_input->bayer_crop_height = incrop->h;
+	dma_input->dma_crop_width = incrop_cfg.w;
+	dma_input->dma_crop_height = incrop_cfg.h;
+	dma_input->bayer_crop_offset_x = incrop_cfg.x;
+	dma_input->bayer_crop_offset_y = incrop_cfg.y;
+	dma_input->bayer_crop_width = incrop_cfg.w;
+	dma_input->bayer_crop_height = incrop_cfg.h;
 	*lindex |= LOWBIT_OF(PARAM_PAF_DMA_INPUT);
 	*hindex |= HIGHBIT_OF(PARAM_PAF_DMA_INPUT);
 	(*indexes)++;
@@ -119,8 +175,8 @@ static int fimc_is_ischain_paf_cfg(struct fimc_is_subdev *leader,
 	else
 		otf_output->cmd = OTF_OUTPUT_COMMAND_DISABLE;
 
-	otf_output->width = otcrop->w;
-	otf_output->height = otcrop->h;
+	otf_output->width = otcrop_cfg.w;
+	otf_output->height = otcrop_cfg.h;
 	otf_output->crop_enable = 0;
 	otf_output->format = OTF_OUTPUT_FORMAT_BAYER;
 	otf_output->bitwidth = OTF_OUTPUT_BIT_WIDTH_12BIT;
@@ -205,6 +261,7 @@ static int fimc_is_ischain_paf_tag(struct fimc_is_subdev *subdev,
 
 	if (!COMPARE_CROP(incrop, &inparm) ||
 		!COMPARE_CROP(otcrop, &otparm) ||
+		CHECK_STRIPE_CFG(&frame->stripe_info) ||
 		test_bit(FIMC_IS_SUBDEV_FORCE_SET, &leader->state)) {
 		ret = fimc_is_ischain_paf_cfg(subdev,
 			device,

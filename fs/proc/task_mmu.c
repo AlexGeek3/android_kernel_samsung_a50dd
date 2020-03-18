@@ -106,14 +106,17 @@ unsigned long task_statm(struct mm_struct *mm,
 void task_statlmkd(struct mm_struct *mm, unsigned long *size,
 			 unsigned long *resident, unsigned long *swapresident)
 {
+#if defined(CONFIG_SWAP)
 	unsigned long swap_orig_nrpages;
 	unsigned long swap_comp_nrpages;
+#endif
 
 	*size = mm->total_vm;
 	*resident = get_mm_counter(mm, MM_FILEPAGES) +
 			get_mm_counter(mm, MM_SHMEMPAGES) +
 			get_mm_counter(mm, MM_ANONPAGES);
 
+#if defined(CONFIG_SWAP)
 	swap_orig_nrpages = get_swap_orig_data_nrpages();
 	swap_comp_nrpages = get_swap_comp_pool_nrpages();
     
@@ -121,6 +124,7 @@ void task_statlmkd(struct mm_struct *mm, unsigned long *size,
         *swapresident = get_mm_counter(mm, MM_SWAPENTS) *
                     swap_comp_nrpages / swap_orig_nrpages;
     }
+#endif
 }
 #ifdef CONFIG_NUMA
 /*
@@ -1230,6 +1234,24 @@ static ssize_t clear_refs_write(struct file *file, const char __user *buf,
 				up_read(&mm->mmap_sem);
 				if (down_write_killable(&mm->mmap_sem)) {
 					count = -EINTR;
+					goto out_mm;
+				}
+				/*
+				 * Avoid to modify vma->vm_flags
+				 * without locked ops while the
+				 * coredump reads the vm_flags.
+				*/
+				if (!mmget_still_valid(mm)) {
+					/*
+					 * Silently return "count"
+					 * like if get_task_mm()
+					 * failed. FIXME: should this
+					 * function have returned
+					 * -ESRCH if get_task_mm()
+					 * failed like if
+					 * get_proc_task() fails?
+					 */
+					up_write(&mm->mmap_sem);
 					goto out_mm;
 				}
 				for (vma = mm->mmap; vma; vma = vma->vm_next) {

@@ -21,7 +21,7 @@
 #include <linux/pinctrl/pinctrl.h>
 #include <linux/pinctrl/pinconf.h>
 #include <linux/smc.h>
-#include <linux/sec_sysfs.h>
+#include <linux/sec_class.h>
 
 #include "dw_mmc.h"
 #include "dw_mmc-pltfm.h"
@@ -420,6 +420,10 @@ static void dw_mci_exynos_adjust_clock(struct dw_mci *host, unsigned int wanted)
 	host->current_speed = 0;
 }
 
+#ifndef MHZ
+#define MHZ (1000 * 1000)
+#endif
+
 static void dw_mci_exynos_set_ios(struct dw_mci *host, struct mmc_ios *ios)
 {
 	struct dw_mci_exynos_priv_data *priv = host->priv;
@@ -464,7 +468,6 @@ static void dw_mci_exynos_set_ios(struct dw_mci *host, struct mmc_ios *ios)
 			dev_info(host->dev, "Setting of SDR104 timing in not been!!\n");
 			clksel = SDMMC_CLKSEL_UP_SAMPLE(priv->sdr_timing, priv->tuned_sample);
 		}
-		dw_mci_exynos_ssclk_control(host, 1);
 		break;
 	case MMC_TIMING_UHS_SDR50:
 		if (priv->sdr50_timing)
@@ -473,10 +476,16 @@ static void dw_mci_exynos_set_ios(struct dw_mci *host, struct mmc_ios *ios)
 			dev_info(host->dev, "Setting of SDR50 timing is not been!!\n");
 			clksel = SDMMC_CLKSEL_UP_SAMPLE(priv->sdr_timing, priv->tuned_sample);
 		}
-		dw_mci_exynos_ssclk_control(host, 1);
 		break;
 	default:
 		clksel = priv->sdr_timing;
+	}
+
+	if (host->pdata->quirks & DW_MCI_QUIRK_USE_SSC) {
+		if ((ios->clock > 0) && (ios->clock < 100 * MHZ))
+			dw_mci_exynos_ssclk_control(host, 0);
+		else if (ios->clock)
+			dw_mci_exynos_ssclk_control(host, 1);
 	}
 
 	host->cclk_in = wanted;
@@ -490,10 +499,6 @@ static void dw_mci_exynos_set_ios(struct dw_mci *host, struct mmc_ios *ios)
 	/* Configure clock rate */
 	dw_mci_exynos_adjust_clock(host, wanted);
 }
-
-#ifndef MHZ
-#define MHZ (1000 * 1000)
-#endif
 
 static int dw_mci_exynos_parse_dt(struct dw_mci *host)
 {
@@ -1416,6 +1421,46 @@ static ssize_t sd_cid_show(struct device *dev,
 out:
 	return len;
 }
+
+static ssize_t sd_health_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct dw_mci *host = dev_get_drvdata(dev);
+	struct mmc_card *cur_card = NULL;
+	struct mmc_card_error_log *err_log;
+	u64 total_c_cnt = 0;
+	u64 total_t_cnt = 0;
+	int len = 0;
+	int i = 0;
+
+	if (host->slot && host->slot->mmc && host->slot->mmc->card)
+		cur_card = host->slot->mmc->card;
+
+	if (!cur_card) {
+		//There should be no spaces in 'No Card'(Vold Team).
+		len = snprintf(buf, PAGE_SIZE, "NOCARD\n");
+		goto out;
+	}
+
+	err_log = cur_card->err_log;
+
+	for (i = 0; i < 6; i++) {
+		if (err_log[i].err_type == -EILSEQ && total_c_cnt < MAX_CNT_U64)
+			total_c_cnt += err_log[i].count;
+		if (err_log[i].err_type == -ETIMEDOUT && total_t_cnt < MAX_CNT_U64)
+			total_t_cnt += err_log[i].count;
+	}
+
+	if(err_log[0].ge_cnt > 100 || err_log[0].ecc_cnt > 0 || err_log[0].wp_cnt > 0 ||
+	   err_log[0].oor_cnt > 10 || total_t_cnt > 100 || total_c_cnt > 100)
+		len = snprintf(buf, PAGE_SIZE, "BAD\n");
+	else
+		len = snprintf(buf, PAGE_SIZE, "GOOD\n");
+
+out:
+	return len;
+}
+
 static DEVICE_ATTR(status, 0444, sd_detection_cmd_show, NULL);
 static DEVICE_ATTR(cd_cnt, 0444, sd_detection_cnt_show, NULL);
 static DEVICE_ATTR(max_mode, 0444, sd_detection_maxmode_show, NULL);
@@ -1424,6 +1469,7 @@ static DEVICE_ATTR(sdcard_summary, 0444, sdcard_summary_show, NULL);
 static DEVICE_ATTR(sd_count, 0444, sd_count_show, NULL);
 static DEVICE_ATTR(sd_data, 0444, sd_data_show, NULL);
 static DEVICE_ATTR(data, 0444, sd_cid_show, NULL);
+static DEVICE_ATTR(fc, 0444, sd_health_show, NULL);
 
 /* Callback function for SD Card IO Error */
 static int sdcard_uevent(struct mmc_card *card)
@@ -1540,6 +1586,10 @@ static void dw_mci_exynos_add_sysfs(struct dw_mci *host)
 
 			if (device_create_file(sd_info_cmd_dev,
 						&dev_attr_data) < 0)
+				pr_err("Fail to create status sysfs file\n");
+
+			if (device_create_file(sd_info_cmd_dev,
+						&dev_attr_fc) < 0)
 				pr_err("Fail to create status sysfs file\n");
 		}
 

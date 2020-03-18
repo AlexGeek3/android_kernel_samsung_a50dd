@@ -21,7 +21,7 @@ u64 get_current_timestamp(void);
 int parse_dataframe(struct ssp_data *, char *, int);
 
 int get_sensor_scanning_info(struct ssp_data *data);
-unsigned int get_firmware_rev(struct ssp_data *data);
+int get_firmware_rev(struct ssp_data *data);
 int set_sensor_position(struct ssp_data *data);
 u64 get_current_timestamp(void);
 
@@ -38,9 +38,14 @@ int get_sensorname(struct ssp_data *data, int sensor_type, char* name, int size)
 void set_proximity_threshold(struct ssp_data *data);
 #ifdef CONFIG_SENSROS_SSP_PROXIMITY_THRESH_CAL
 void set_proximity_threshold_addval(struct ssp_data *data);
+#endif
+#ifdef CONFIG_SENSORS_SSP_PROXIMITY_MODIFY_SETTINGS
+void set_proximity_setting_mode(struct ssp_data *data);
+int save_proximity_setting_mode(struct ssp_data *data);
+int open_proximity_setting_mode(struct ssp_data *data);
+#endif
 void do_proximity_calibration(struct ssp_data *data);
 void proximity_calibration_off(struct ssp_data *data);
-#endif
 #endif
 #ifdef CONFIG_SENSORS_SSP_LIGHT
 void set_light_coef(struct ssp_data *data);

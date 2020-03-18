@@ -201,7 +201,7 @@ config CFG80211_WEXT_EXPORT
 config CFG80211_REG_NOT_UPDATED
 	bool "Do not update Regulatory configuration"
 	depends on CFG80211
-	default y
+	default n
 	help
 	  Regulation should not updated even if device found other country
 	  Access Point Beacon once since device should find around other

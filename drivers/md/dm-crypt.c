@@ -1590,7 +1590,7 @@ static int kcryptd_io_read(struct dm_crypt_io *io, gfp_t gfp)
 	clone_init(io, clone);
 
 	if (crypt_mode_diskcipher(cc))
-		crypto_diskcipher_set(clone, cc->cipher_tfm.tfms_diskc[0]);
+		crypto_diskcipher_set(clone, cc->cipher_tfm.tfms_diskc[0], 0);
 
 	clone->bi_iter.bi_sector = cc->start + io->sector;
 

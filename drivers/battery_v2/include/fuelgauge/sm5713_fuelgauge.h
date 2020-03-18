@@ -167,7 +167,7 @@ struct sm5713_fg_info {
     int v_offset_cancel_level;
     int v_offset_cancel_mohm;
 
-    int volt_cal;
+    int volt_cal[2];
     int en_auto_i_offset;
     int ecv_i_off;
     int csp_i_off;
@@ -184,8 +184,11 @@ struct sm5713_fg_info {
 
     int cntl_value;
 #ifdef ENABLE_FULL_OFFSET
+    int full_offset_enable;
     int full_offset_margin;
     int full_extra_offset;
+    int aux_stat_base;
+    int aux_stat_check;
 #endif
 
     int temp_std;
@@ -218,8 +221,12 @@ struct sm5713_fg_info {
     int low_temp_p_cal_fact;
     int low_temp_n_cal_denom;
     int low_temp_n_cal_fact;
+    int coeff;
 
     int data_ver;
+    int age_cntl;
+    int tcal_ioff[2];
+
     uint32_t soc_alert_flag : 1;  /* 0 : nu-occur, 1: occur */
     uint32_t volt_alert_flag : 1; /* 0 : nu-occur, 1: occur */
     uint32_t flag_full_charge : 1; /* 0 : no , 1 : yes*/

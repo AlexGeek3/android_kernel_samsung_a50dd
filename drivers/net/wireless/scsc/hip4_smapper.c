@@ -165,7 +165,9 @@ static void hip4_smapper_refill_isr(int irq, void *data)
 	struct hip4_smapper_bank *bank;
 	enum smapper_banks i;
 	unsigned long flags;
-	static DEFINE_RATELIMIT_STATE(ratelimit, 1 * HZ, 1);
+	/* Temporary removed
+	 * static DEFINE_RATELIMIT_STATE(ratelimit, 1 * HZ, 1);
+	 */
 
 	control = &(hip->hip_priv->smapper_control);
 #ifdef CONFIG_SCSC_QOS
@@ -178,8 +180,11 @@ static void hip4_smapper_refill_isr(int irq, void *data)
 	if (atomic_read(&hip->hip_priv->in_suspend) ||
 	    *control->mbox_ptr == 0x0) {
 #endif
-		if (__ratelimit(&ratelimit))
-			SLSI_DBG1_NODEV(SLSI_SMAPPER, "Ignore SMAPPER request. Invalid state.\n");
+	/*
+	 * Temporary removed
+	 * if (__ratelimit(&ratelimit))
+	 * 	SLSI_DBG1_NODEV(SLSI_SMAPPER, "Ignore SMAPPER request. Invalid state.\n");
+	 */
 		/* Clear interrupt */
 		scsc_service_mifintrbit_bit_clear(sdev->service, control->th_req);
 		return;
@@ -188,7 +193,9 @@ static void hip4_smapper_refill_isr(int irq, void *data)
 	spin_lock_irqsave(&control->smapper_lock, flags);
 	/* Check if FW has requested a BANK configuration */
 	if (HIP4_SMAPPER_BANKS_CHECK_CONFIGURE(*control->mbox_ptr)) {
-		SLSI_DBG4_NODEV(SLSI_SMAPPER, "Trigger SMAPPER configuration\n");
+		/* Temporary removed
+	 	* SLSI_DBG4_NODEV(SLSI_SMAPPER, "Trigger SMAPPER configuration\n");
+	 	*/
 		scsc_service_mifsmapper_configure(sdev->service, SMAPPER_GRANULARITY);
 		HIP4_SMAPPER_BANKS_CONFIGURE_DONE(*control->mbox_ptr);
 	}
@@ -200,14 +207,20 @@ static void hip4_smapper_refill_isr(int irq, void *data)
 			continue;
 
 		if (HIP4_SMAPPER_GET_BANK_OWNER(bank->bank, *control->mbox_ptr) == HIP_SMAPPER_OWNER_HOST) {
-			SLSI_DBG4_NODEV(SLSI_SMAPPER, "SKB allocation at bank %d\n", i);
+			/* Temporary removed
+			 * SLSI_DBG4_NODEV(SLSI_SMAPPER, "SKB allocation at bank %d\n", i);
+			 */
 			if (hip4_smapper_allocate_skb_buffers(sdev, bank)) {
-				SLSI_DBG4_NODEV(SLSI_SMAPPER, "Error Allocating skb buffers at bank %d. Setting owner to FW\n", i);
+				/* Temporary removed
+				 * SLSI_DBG4_NODEV(SLSI_SMAPPER, "Error Allocating skb buffers at bank %d. Setting owner to FW\n", i);
+				 */
 				HIP4_SMAPPER_SET_BANK_OWNER(bank->bank, *control->mbox_ptr, HIP_SMAPPER_OWNER_FW);
 				continue;
 			}
 			if (hip4_smapper_program(sdev, bank)) {
-				SLSI_DBG4_NODEV(SLSI_SMAPPER, "Error Programming bank %d. Setting owner to FW\n", i);
+				/* Temporary removed
+				 * SLSI_DBG4_NODEV(SLSI_SMAPPER, "Error Programming bank %d. Setting owner to FW\n", i);
+				 */
 				HIP4_SMAPPER_SET_BANK_OWNER(bank->bank, *control->mbox_ptr, HIP_SMAPPER_OWNER_FW);
 				continue;
 			}
@@ -246,7 +259,7 @@ int hip4_smapper_consume_entry(struct slsi_dev *sdev, struct slsi_hip4 *hip, str
 	headroom = desc->headroom;
 
 
-	if (bank_num > HIP4_SMAPPER_TOTAL_BANKS) {
+	if (bank_num >= HIP4_SMAPPER_TOTAL_BANKS) {
 		SLSI_DBG4_NODEV(SLSI_SMAPPER, "Incorrect bank_num %d\n", bank_num);
 		goto error;
 	}

@@ -13,6 +13,7 @@
  *
  */
 #include <linux/kernel.h>
+#include <linux/slab.h>
 #include "../ssp.h"
 #include "../sensors_core.h"
 #include "ssp_factory.h"
@@ -91,25 +92,13 @@ static ssize_t gyro_selftest_dps_show(struct device *dev,
                                       struct device_attribute *attr, char *buf)
 {
 	struct ssp_data *data = dev_get_drvdata(dev);
-	if(data->gyro_ops == NULL || data->gyro_ops->get_gyro_selftest_dps == NULL)
-		return -EINVAL;
-
-	return data->gyro_ops->get_gyro_selftest_dps(data, buf);
+	return sprintf(buf, "%u\n", data->buf[SENSOR_TYPE_GYROSCOPE].gyro_dps);
 }
 
 static ssize_t gyro_selftest_dps_store(struct device *dev,
                                        struct device_attribute *attr, const char *buf, size_t size)
 {
-	struct ssp_data *data = dev_get_drvdata(dev);
-	int ret = 0;
-	if(data->gyro_ops == NULL || data->gyro_ops->set_gyro_selftest_dps == NULL)
-		return -EINVAL;
-
-    ret = data->gyro_ops->set_gyro_selftest_dps(data, buf);
-    if(ret != SUCCESS) {
-        pr_info("[SSP] Do not support gyro dps ret %d \n", ret);
-    }
-
+    ssp_info("Do not support gyro dps selftest");
 	return size;
 }
 

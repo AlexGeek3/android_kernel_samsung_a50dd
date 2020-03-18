@@ -8,7 +8,7 @@
  */
 
 /* usb hw param */
-/* usb notify layer v3.2 */
+/* usb notify layer v3.3 */
 
 #define MAX_HWPARAM_STR_LEN 1024
 #define MAX_HWPARAM_STRING 10
@@ -59,6 +59,7 @@ enum usb_hw_param {
 	USB_MUIC_AFC_NACK_COUNT,
 	USB_MUIC_AFC_ERROR_COUNT,
 	USB_MUIC_DCD_TIMEOUT_COUNT,
+	USB_HALL_FOLDING_COUNT,
 	USB_CCIC_USB_KILLER_COUNT,
 	USB_CCIC_FWUP_ERROR_COUNT,
 	USB_CCIC_VERSION,
@@ -67,5 +68,4 @@ enum usb_hw_param {
 
 #if defined(CONFIG_USB_TYPEC_MANAGER_NOTIFIER)
 unsigned long manager_hw_param_update(int param);
-unsigned long long show_ccic_version(void);
 #endif

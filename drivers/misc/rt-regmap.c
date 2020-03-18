@@ -29,7 +29,7 @@
 #include <linux/workqueue.h>
 
 #include <linux/rt-regmap.h>
-#define RT_REGMAP_VERSION	"1.1.13_G"
+#define RT_REGMAP_VERSION	"1.1.14_G"
 
 struct rt_regmap_ops {
 	int (*regmap_block_write)(struct rt_regmap_device *rd, u32 reg,
@@ -398,7 +398,7 @@ finished:
 	if (rd->props.io_log_en) {
 		j = 0;
 		for (i = 0; i < count; i++)
-			j += snprintf(wri_data + j, PAGE_SIZE,
+			j += snprintf(wri_data + j, 128,
 			"%02x,", wdata[i]);
 		pr_info("RT_REGMAP [WRITE] reg0x%04x  [Data] 0x%s\n",
 							reg, wri_data);
@@ -470,7 +470,7 @@ finished:
 	if (rd->props.io_log_en) {
 		j = 0;
 		for (i = 0; i < count; i++)
-			j += snprintf(wri_data + j, PAGE_SIZE,
+			j += snprintf(wri_data + j, 128,
 			"%02x,", wdata[i]);
 		pr_info("RT_REGMAP [WRITE] reg0x%04x  [Data] 0x%s\n",
 								reg, wri_data);
@@ -1878,7 +1878,7 @@ static void rt_create_every_debug(struct rt_regmap_device *rd,
 		rd->props.register_num*sizeof(struct rt_debug_st *),
 								GFP_KERNEL);
 	for (i = 0; i < rd->props.register_num; i++) {
-		snprintf(buf, PAGE_SIZE, "reg0x%02x", (rd->props.rm[i])->addr);
+		snprintf(buf, 10, "reg0x%02x", (rd->props.rm[i])->addr);
 		rd->rt_reg_file[i] = devm_kzalloc(&rd->dev,
 						  sizeof(*rd->rt_reg_file[i]),
 						  GFP_KERNEL);

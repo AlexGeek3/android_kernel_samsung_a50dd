@@ -19,3 +19,19 @@ config SEC_VIB
 	help
 		If you say yes here you will get support for the
 		SEC DC Vibrator.
+
+config STEP_MOTOR_STSPIN220
+	tristate "STSPIN220"
+	default n
+	help
+          Say Y to enable STSPIN220 support
+	  You will get supprot for that.
+
+	  If unsure, say N.
+
+config BOOST_POWER_SHARE
+	bool "Boost Power Share"
+	default n
+	help
+	  Say Y to enable Boost Power(5V) share.
+

@@ -349,11 +349,7 @@ struct ipc_buf {
 	volatile u32 dq;
 	volatile u32 full;
 	volatile u32 empty;
-#ifdef USE_IPC_BUF
-	u8 buf[IPC_DATA_SIZE];
-#else
 	struct ipc_channel_buf ch[IPC_CH_BUF_NUM];
-#endif
 };
 
 struct ipc_debug {
@@ -366,6 +362,20 @@ struct ipc_map_area {
 	struct ipc_evt evt[IPC_EVT_MAX];
 	struct ipc_debug dbg;
 	struct ipc_logbuf logbuf;
+};
+
+struct mailbox_sfr {
+            unsigned int MCUCTL;
+            unsigned int INTGR0;
+            unsigned int INTCR0;
+            unsigned int INTMR0;
+            unsigned int INTSR0;
+            unsigned int INTMSR0;
+            unsigned int INTGR1;
+            unsigned int INTCR1;
+            unsigned int INTMR1;
+            unsigned int INTSR1;
+            unsigned int INTMSR1;
 };
 
 /*  mailbox Registers */
@@ -449,6 +459,8 @@ void ipc_hw_clear_int_pend_reg(enum ipc_owner owner, int irq);
 void ipc_hw_clear_all_int_pend_reg(enum ipc_owner owner);
 void ipc_hw_gen_interrupt(enum ipc_owner owner, int irq);
 void ipc_hw_set_mcuctrl(enum ipc_owner owner, unsigned int val);
+void ipc_hw_mask_all(enum ipc_owner owner);
+void ipc_dump_mailbox_sfr(struct mailbox_sfr *mailbox);
 void ipc_hw_mask_irq(enum ipc_owner owner, int irq);
 void ipc_hw_unmask_irq(enum ipc_owner owner, int irq);
 void ipc_logbuf_put_with_char(char ch);
@@ -474,11 +486,7 @@ u32 *ipc_get_chub_psp(void);
 u32 *ipc_get_chub_msp(void);
 #endif
 
-#ifdef USE_IPC_BUF
-int ipc_read_data(enum ipc_data_list dir, u8 *rx);
-#else
 void *ipc_read_data(enum ipc_data_list dir, u32 *len);
-#endif
 int ipc_write_data(enum ipc_data_list dir, void *tx, u16 length);
 
 #endif

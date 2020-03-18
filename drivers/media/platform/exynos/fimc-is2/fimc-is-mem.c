@@ -526,7 +526,6 @@ static void *fimc_is_ion_init(struct platform_device *pdev)
 	mutex_init(&ctx->lock);
 
 	return ctx;
-
 }
 
 static void fimc_is_ion_deinit(void *ctx)
@@ -538,11 +537,10 @@ static void fimc_is_ion_deinit(void *ctx)
 }
 
 static struct fimc_is_priv_buf *fimc_is_ion_alloc(void *ctx,
-		size_t size, size_t align)
+		size_t size, const char *heapname, unsigned int flags)
 {
 	struct fimc_is_ion_ctx *alloc_ctx = ctx;
 	struct fimc_is_priv_buf *buf;
-	const char *heapname = "ion_system_heap";
 	int ret = 0;
 
 	buf = vzalloc(sizeof(*buf));
@@ -551,7 +549,8 @@ static struct fimc_is_priv_buf *fimc_is_ion_alloc(void *ctx,
 
 	size = PAGE_ALIGN(size);
 
-	buf->dma_buf = ion_alloc_dmabuf(heapname, size, alloc_ctx->flags);
+	buf->dma_buf = ion_alloc_dmabuf(heapname ? heapname : "ion_system_heap",
+				size, flags ? flags : alloc_ctx->flags);
 	if (IS_ERR(buf->dma_buf)) {
 		ret = -ENOMEM;
 		goto err_alloc;

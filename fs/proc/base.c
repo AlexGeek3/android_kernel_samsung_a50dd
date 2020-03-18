@@ -434,6 +434,20 @@ static int proc_pid_stack(struct seq_file *m, struct pid_namespace *ns,
 	int err;
 	int i;
 
+	/*
+	 * The ability to racily run the kernel stack unwinder on a running task
+	 * and then observe the unwinder output is scary; while it is useful for
+	 * debugging kernel issues, it can also allow an attacker to leak kernel
+	 * stack contents.
+	 * Doing this in a manner that is at least safe from races would require
+	 * some work to ensure that the remote task can not be scheduled; and
+	 * even then, this would still expose the unwinder as local attack
+	 * surface.
+	 * Therefore, this interface is restricted to root.
+	 */
+	if (!file_ns_capable(m->file, &init_user_ns, CAP_SYS_ADMIN))
+		return -EACCES;
+
 	entries = kmalloc(MAX_STACK_TRACE_DEPTH * sizeof(*entries), GFP_KERNEL);
 	if (!entries)
 		return -ENOMEM;
@@ -3150,6 +3164,35 @@ static int proc_pid_patch_state(struct seq_file *m, struct pid_namespace *ns,
 }
 #endif /* CONFIG_LIVEPATCH */
 
+#ifdef CONFIG_PROC_TRIGGER_SQLITE_BUG
+static ssize_t trigger_sqlite_bug_write(struct file *file,
+		const char __user *buf, size_t count, loff_t *offset)
+{
+	char buffer[PROC_NUMBUF] = {0, };
+	int ret;
+	int fd;
+	struct file *filp;
+
+	if (count > sizeof(buffer) - 1)
+		return -EINVAL;
+	if (copy_from_user(buffer, buf, count))
+		return -EFAULT;
+	ret = kstrtoint(strstrip(buffer), 10, &fd);
+	if (ret < 0)
+		return ret;
+
+	filp = fget(fd);
+
+	pr_err("%s: fd=%d filp=%p %s", __func__, fd, filp,
+			filp ? filp->f_path.dentry->d_name.name : NULL);
+	BUG();
+}
+
+const struct file_operations proc_trigger_sqlite_bug_operations = {
+	.write	= trigger_sqlite_bug_write,
+};
+#endif /* CONFIG_PROC_TRIGGER_SQLITE_BUG */
+
 /*
  * Thread groups
  */
@@ -3258,6 +3301,9 @@ static const struct pid_entry tgid_base_stuff[] = {
 #ifdef CONFIG_FIVE
 	DIR("integrity", S_IRUGO|S_IXUGO, proc_integrity_inode_operations,
 			proc_integrity_operations),
+#endif
+#ifdef CONFIG_PROC_TRIGGER_SQLITE_BUG
+	REG("trigger_sqlite_bug", S_IWUSR, proc_trigger_sqlite_bug_operations),
 #endif
 #ifdef CONFIG_CPU_FREQ_TIMES
 	ONE("time_in_state", 0444, proc_time_in_state_show),

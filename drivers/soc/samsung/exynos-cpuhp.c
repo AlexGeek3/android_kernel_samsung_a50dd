@@ -72,10 +72,7 @@ static int cpuhp_do(int fast_hp);
  */
 static inline void cpuhp_suspend(bool enable)
 {
-	/* This lock guarantees completion of cpuhp_do() */
-	mutex_lock(&cpuhp.lock);
 	cpuhp.suspended = enable;
-	mutex_unlock(&cpuhp.lock);
 }
 
 /*
@@ -84,9 +81,7 @@ static inline void cpuhp_suspend(bool enable)
  */
 static inline void cpuhp_enable(bool enable)
 {
-	mutex_lock(&cpuhp.lock);
 	cpuhp.enabled = enable;
-	mutex_unlock(&cpuhp.lock);
 }
 
 /* find user matched name. if return NULL, there is no user matched name */
@@ -132,6 +127,7 @@ int exynos_cpuhp_unregister(char *name, struct cpumask mask, int type)
  */
 int exynos_cpuhp_register(char *name, struct cpumask mask, int type)
 {
+	int ret;
 	struct cpuhp_user *user;
 	char buf[10];
 
@@ -158,10 +154,12 @@ int exynos_cpuhp_register(char *name, struct cpumask mask, int type)
 	scnprintf(buf, sizeof(buf), "%*pbl", cpumask_pr_args(&user->online_cpus));
 	pr_info("CPUHP: reigstered new user(name:%s, mask:%s)\n", user->name, buf);;
 
+	/* applying new user's request */
+	ret = cpuhp_do(true);
+
 	mutex_unlock(&cpuhp.lock);
 
-	/* applying new user's request */
-	return cpuhp_do(true);
+	return ret;
 }
 
 /*
@@ -171,14 +169,20 @@ int exynos_cpuhp_register(char *name, struct cpumask mask, int type)
  */
 int exynos_cpuhp_request(char *name, struct cpumask mask, int type)
 {
-	if (cpuhp_update_user(name, mask, type))
+	int ret;
+
+	mutex_lock(&cpuhp.lock);
+
+	if (cpuhp_update_user(name, mask, type)) {
+		mutex_unlock(&cpuhp.lock);
 		return 0;
+	}
 
-	/* use fast cpu hotplug sequence */
-	if (type == FAST_HP)
-		return cpuhp_do(true);
+	ret = cpuhp_do(true);
 
-	return cpuhp_do(true);
+	mutex_unlock(&cpuhp.lock);
+
+	return ret;
 }
 
 /**********************************************************************************/
@@ -334,15 +338,12 @@ static int cpuhp_do(int fast_hp)
 	int ret = 0;
 	struct cpumask online_cpus, enable_cpus, disable_cpus;
 
-	mutex_lock(&cpuhp.lock);
 	/*
 	 * If cpu hotplug is disabled or suspended,
 	 * cpuhp_do() do nothing.
 	 */
-	if (!cpuhp.enabled || cpuhp.suspended) {
-		mutex_unlock(&cpuhp.lock);
+	if (!cpuhp.enabled || cpuhp.suspended)
 		return 0;
-	}
 
 	online_cpus = cpuhp_get_online_cpus();
 	cpuhp_print_debug_info(online_cpus, fast_hp);
@@ -367,8 +368,6 @@ static int cpuhp_do(int fast_hp)
 	cpumask_copy(&cpuhp.online_cpus, &online_cpus);
 
 out:
-	mutex_unlock(&cpuhp.lock);
-
 	return ret;
 }
 
@@ -377,12 +376,11 @@ static int cpuhp_control(bool enable)
 	struct cpumask mask;
 	int ret = 0;
 
+	mutex_lock(&cpuhp.lock);
 	if (enable) {
 		cpuhp_enable(true);
 		cpuhp_do(true);
 	} else {
-		mutex_lock(&cpuhp.lock);
-
 		cpumask_setall(&mask);
 		cpumask_andnot(&mask, &mask, cpu_online_mask);
 
@@ -400,9 +398,8 @@ static int cpuhp_control(bool enable)
 		} else {
 			pr_err("Fail to disable cpu hotplug, please try again\n");
 		}
-
-		mutex_unlock(&cpuhp.lock);
 	}
+	mutex_unlock(&cpuhp.lock);
 
 	return ret;
 }
@@ -431,8 +428,10 @@ static ssize_t store_##name##_online_cpu(struct kobject *kobj,			\
 	struct kobj_attribute *attr, const char *buf,				\
 	size_t count)								\
 {										\
-	cpumask_parse(buf, &cpuhp.sysfs_user.online_cpus);				\
-	cpuhp_do(true);					\
+	mutex_lock(&cpuhp.lock);						\
+	cpumask_parse(buf, &cpuhp.sysfs_user.online_cpus);			\
+	cpuhp_do(true);								\
+	mutex_unlock(&cpuhp.lock);						\
 										\
 	return count;								\
 }										\
@@ -564,6 +563,7 @@ static const struct attribute_group cpuhp_group = {
 static int exynos_cpuhp_pm_notifier(struct notifier_block *notifier,
 				       unsigned long pm_event, void *v)
 {
+	mutex_lock(&cpuhp.lock);
 	switch (pm_event) {
 	case PM_SUSPEND_PREPARE:
 		cpuhp_suspend(true);
@@ -574,6 +574,7 @@ static int exynos_cpuhp_pm_notifier(struct notifier_block *notifier,
 		cpuhp_do(true);
 		break;
 	}
+	mutex_unlock(&cpuhp.lock);
 
 	return NOTIFY_OK;
 }

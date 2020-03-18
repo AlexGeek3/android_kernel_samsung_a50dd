@@ -278,7 +278,7 @@ int fimc_is_lib_vra_invoke_contol_event(struct fimc_is_lib_vra *lib_vra)
 
 	dbg_lib(3, "lib_vra_invoke_contol_event: type(%d)\n", lib_vra->ctl_task_type);
 
-	if (in_interrupt()) {
+	if (in_irq()) {
 		spin_lock(&lib_vra->ctl_lock);
 		status = CALL_VRAOP(lib_vra, on_control_task_event,
 					lib_vra->fr_work_heap);
@@ -314,7 +314,7 @@ int fimc_is_lib_vra_invoke_fwalgs_event(struct fimc_is_lib_vra *lib_vra)
 
 	dbg_lib(3, "lib_vra_invoke_fwalgs_event: type(%d)\n", lib_vra->algs_task_type);
 
-	if (in_interrupt()) {
+	if (in_irq()) {
 		spin_lock(&lib_vra->algs_lock);
 		status = CALL_VRAOP(lib_vra, on_fw_algs_task_event,
 					lib_vra->fr_work_heap);
@@ -1291,7 +1291,7 @@ void fimc_is_lib_vra_os_funcs(void)
 	funcs.spin_lock_irqsave      = fimc_is_spin_lock_irqsave;
 	funcs.spin_unlock_irqrestore = fimc_is_spin_unlock_irqrestore;
 	funcs.lib_assert       = fimc_is_lib_vra_assert;
-	funcs.lib_in_interrupt = fimc_is_lib_in_interrupt;
+	funcs.lib_in_irq       = fimc_is_lib_in_irq;
 
 #ifdef ENABLE_FPSIMD_FOR_USER
 	fpsimd_get();

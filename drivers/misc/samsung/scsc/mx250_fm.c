@@ -13,6 +13,9 @@
 
 #include <scsc/scsc_logring.h>
 #include <scsc/scsc_mx.h>
+
+#include "mxman.h"	/* Special case service driver that looks inside mxman */
+
 #ifdef CONFIG_SCSC_FM_TEST
 #include "mx250_fm_test.h"
 #endif
@@ -38,26 +41,42 @@ static int service_id = SCSC_SERVICE_ID_FM;
 
 static DEFINE_MUTEX(ss_lock);
 
-
-static void fm_client_stop_on_failure(struct scsc_service_client *client)
+static u8 fm_client_failure_notification(struct scsc_service_client *client, struct mx_syserr_decode *err)
 {
 	(void)client;
+	SCSC_TAG_DEBUG(FM, "OK\n");
+	return err->level;
+}
+
+
+static bool fm_client_stop_on_failure(struct scsc_service_client *client, struct mx_syserr_decode *err)
+{
+	(void)client;
+	(void)err;
 	mutex_lock(&ss_lock);
 	fm_client->fm_api_available = false;
 	mutex_unlock(&ss_lock);
 	SCSC_TAG_DEBUG(FM, "OK\n");
+	return false;
 }
 
-static void fm_client_failure_reset(struct scsc_service_client *client, u16 scsc_panic_code)
+static void fm_client_failure_reset(struct scsc_service_client *client, u8 level, u16 scsc_syserr_code)
 {
 	(void)client;
-	(void)scsc_panic_code;
+	(void)level;
+	(void)scsc_syserr_code;
 	SCSC_TAG_DEBUG(FM, "OK\n");
 }
 
 static int stop_close_service(void)
 {
 	int r;
+
+	if (!fm_client->fm_service) {
+		SCSC_TAG_ERR(FM, "No fm_service\n");
+		r = -EINVAL;
+		goto done;
+	}
 
 	r = scsc_mx_service_stop(fm_client->fm_service);
 	if (r) {
@@ -144,13 +163,14 @@ static int open_start_close_service(void)
 
 	if (fm_client->ldo_on) {
 		/* FM turning on */
-		scsc_service_on_halt_ldos_on(fm_client->fm_service);
+		mxman_fm_on_halt_ldos_on();
+
 	} else {
 		/* FM turning off */
-		scsc_service_on_halt_ldos_off(fm_client->fm_service);
+		mxman_fm_on_halt_ldos_off();
 
 		/* Invalidate stored FM params */
-		scsc_service_fm_set_params(fm_client->fm_service, NULL);
+		mxman_fm_set_params(NULL);
 	}
 
 	r = stop_close_service();
@@ -245,7 +265,7 @@ static int mx250_fm_re(bool ldo_on)
 int mx250_fm_request(void)
 {
 
-	SCSC_TAG_DEBUG(FM, "mx250: %s\n", __func__);
+	SCSC_TAG_INFO(FM, "request\n");
 	return mx250_fm_re(true);
 }
 EXPORT_SYMBOL(mx250_fm_request);
@@ -255,7 +275,7 @@ EXPORT_SYMBOL(mx250_fm_request);
  */
 int mx250_fm_release(void)
 {
-	SCSC_TAG_DEBUG(FM, "mx250: %s\n", __func__);
+	SCSC_TAG_INFO(FM, "release\n");
 	return mx250_fm_re(false);
 }
 EXPORT_SYMBOL(mx250_fm_release);
@@ -274,7 +294,7 @@ void mx250_fm_set_params(struct wlbt_fm_params *info)
 
 	SCSC_TAG_INFO(FM, "freq %u\n", info->freq);
 
-	scsc_service_fm_set_params(fm_client->fm_service, info);
+	mxman_fm_set_params(info);
 
 	mutex_unlock(&ss_lock);
 }
@@ -286,8 +306,9 @@ void fm_client_module_probe(struct scsc_mx_module_client *module_client, struct 
 	/* Avoid unused error */
 	(void)module_client;
 
+	SCSC_TAG_INFO(FM, "probe\n");
+
 	mutex_lock(&ss_lock);
-	SCSC_TAG_DEBUG(FM, "mx250: %s\n", __func__);
 	if (reason == SCSC_MODULE_CLIENT_REASON_HW_PROBE) {
 		fm_client = kzalloc(sizeof(*fm_client), GFP_KERNEL);
 		if (!fm_client) {
@@ -296,8 +317,9 @@ void fm_client_module_probe(struct scsc_mx_module_client *module_client, struct 
 		}
 		init_completion(&fm_client->fm_client_work_completion);
 		fm_client_wq_init();
-		fm_client->fm_service_client.stop_on_failure   = fm_client_stop_on_failure;
-		fm_client->fm_service_client.failure_reset     = fm_client_failure_reset;
+		fm_client->fm_service_client.failure_notification = fm_client_failure_notification;
+		fm_client->fm_service_client.stop_on_failure_v2   = fm_client_stop_on_failure;
+		fm_client->fm_service_client.failure_reset_v2     = fm_client_failure_reset;
 		fm_client->mx = mx;
 	}
 	fm_client->fm_api_available = true;
@@ -311,8 +333,9 @@ void fm_client_module_remove(struct scsc_mx_module_client *module_client, struct
 	/* Avoid unused error */
 	(void)module_client;
 
+	SCSC_TAG_INFO(FM, "remove\n");
+
 	mutex_lock(&ss_lock);
-	SCSC_TAG_DEBUG(FM, "mx250: %s\n", __func__);
 	if (reason == SCSC_MODULE_CLIENT_REASON_HW_REMOVE) {
 		if (!fm_client) {
 			mutex_unlock(&ss_lock);
@@ -342,7 +365,7 @@ static int __init scsc_fm_client_module_init(void)
 {
 	int r;
 
-	SCSC_TAG_DEBUG(FM, "mx250:\n");
+	SCSC_TAG_INFO(FM, "init\n");
 
 	r = scsc_mx_module_register_client_module(&fm_client_driver);
 	if (r) {
@@ -357,7 +380,7 @@ static int __init scsc_fm_client_module_init(void)
 
 static void __exit scsc_fm_client_module_exit(void)
 {
-	SCSC_TAG_DEBUG(FM, "mx250:\n");
+	SCSC_TAG_INFO(FM, "exit\n");
 	scsc_mx_module_unregister_client_module(&fm_client_driver);
 #ifdef CONFIG_SCSC_FM_TEST
 	mx250_fm_test_exit();

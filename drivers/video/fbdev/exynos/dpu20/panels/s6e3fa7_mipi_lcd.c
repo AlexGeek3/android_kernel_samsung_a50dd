@@ -36,12 +36,10 @@
 #define PANEL_STATE_RESUMED	1
 #define PANEL_STATE_SUSPENDING	2
 
-#if 0
 struct panel_private {
 	unsigned int lcd_connected;
 	void *par;
 };
-#endif
 
 struct lcd_info {
 	unsigned int	connected;
@@ -53,7 +51,6 @@ struct lcd_info {
 
 struct panel_private panel_priv;
 
-#if 0
 static BLOCKING_NOTIFIER_HEAD(decon_notifier_list);
 
 int decon_register_notifier(struct notifier_block *nb)
@@ -90,7 +87,6 @@ static int decon_notifier_event(struct notifier_block *this,
 
 	return NOTIFY_DONE;
 }
-#endif
 
 static int s6e3fa7_get_brightness(struct backlight_device *bd)
 {
@@ -176,7 +172,7 @@ static int s6e3fa7_probe(struct dsim_device *dsim)
 	struct lcd_info *lcd = panel_priv.par;
 	struct panel_private *priv = &panel_priv;
 
-	priv->lcdconnected = lcd->connected = 1;
+	priv->lcd_connected = lcd->connected = 1;
 
 	lcd->dsim = dsim;
 	lcd->state = PANEL_STATE_SUSPENED;
@@ -258,7 +254,7 @@ static int s6e3fa7_register_notifier(struct lcd_info *lcd)
 	int ret = 0;
 
 	lcd->fb_notifier.notifier_call = fb_notifier_callback;
-	fb_register_client(&lcd->fb_notifier);
+	decon_register_notifier(&lcd->fb_notifier);
 
 	return ret;
 }
@@ -357,7 +353,6 @@ struct dsim_lcd_driver s6e3fa7_mipi_lcd_driver = {
 	.resume		= dsim_panel_dump,
 };
 
-#if 0
 static struct notifier_block decon_fb_notifier = {
 	.notifier_call = decon_notifier_event,
 };
@@ -376,5 +371,4 @@ static int __init decon_notifier_init(void)
 
 late_initcall(decon_notifier_init);
 module_exit(decon_notifier_exit);
-#endif
 

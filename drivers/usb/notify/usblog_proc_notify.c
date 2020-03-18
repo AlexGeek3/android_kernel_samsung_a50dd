@@ -6,7 +6,7 @@
  *
  */
 
- /* usb notify layer v3.2 */
+ /* usb notify layer v3.3 */
 
  #define pr_fmt(fmt) "usb_notify: " fmt
 
@@ -23,17 +23,19 @@
 #include <linux/sched/clock.h>
 #include <linux/usb_notify.h>
 
-#define USBLOG_MAX_BUF_SIZE	(1 << 7) /* 128 */
-#define USBLOG_MAX_BUF2_SIZE	(1 << 8) /* 256 */
-#define USBLOG_MAX_BUF3_SIZE	(1 << 9) /* 512 */
+#define USBLOG_MAX_BUF_SIZE	(1 << 6) /* 64 */
+#define USBLOG_MAX_BUF2_SIZE	(1 << 7) /* 128 */
+#define USBLOG_MAX_BUF3_SIZE	(1 << 8) /* 256 */
+#define USBLOG_MAX_BUF4_SIZE	(1 << 9) /* 512 */
 #define USBLOG_MAX_STRING_SIZE	(1 << 4) /* 16 */
 #define USBLOG_CMP_INDEX	3
 
-#define USBLOG_CCIC_BUFFER_SIZE	USBLOG_MAX_BUF3_SIZE
+#define USBLOG_CCIC_BUFFER_SIZE	USBLOG_MAX_BUF4_SIZE
 #define USBLOG_MODE_BUFFER_SIZE	USBLOG_MAX_BUF_SIZE
-#define USBLOG_STATE_BUFFER_SIZE	USBLOG_MAX_BUF2_SIZE
+#define USBLOG_STATE_BUFFER_SIZE	USBLOG_MAX_BUF3_SIZE
 #define USBLOG_EVENT_BUFFER_SIZE	USBLOG_MAX_BUF_SIZE
-#define USBLOG_EXTRA_BUFFER_SIZE	USBLOG_MAX_BUF_SIZE
+#define USBLOG_PORT_BUFFER_SIZE		USBLOG_MAX_BUF2_SIZE
+#define USBLOG_EXTRA_BUFFER_SIZE	USBLOG_MAX_BUF2_SIZE
 
 struct ccic_buf {
 	unsigned long long ts_nsec;
@@ -57,6 +59,13 @@ struct event_buf {
 	int enable;
 };
 
+struct port_buf {
+	unsigned long long ts_nsec;
+	int type;
+	uint16_t param1;
+	uint16_t param2;
+};
+
 struct extra_buf {
 	unsigned long long ts_nsec;
 	int event;
@@ -67,16 +76,19 @@ struct usblog_buf {
 	unsigned long long mode_count;
 	unsigned long long state_count;
 	unsigned long long event_count;
+	unsigned long long port_count;
 	unsigned long long extra_count;
 	unsigned long ccic_index;
 	unsigned long mode_index;
 	unsigned long state_index;
 	unsigned long event_index;
+	unsigned long port_index;
 	unsigned long extra_index;
 	struct ccic_buf ccic_buffer[USBLOG_CCIC_BUFFER_SIZE];
 	struct mode_buf mode_buffer[USBLOG_MODE_BUFFER_SIZE];
 	struct state_buf state_buffer[USBLOG_STATE_BUFFER_SIZE];
 	struct event_buf event_buffer[USBLOG_EVENT_BUFFER_SIZE];
+	struct port_buf port_buffer[USBLOG_PORT_BUFFER_SIZE];
 	struct extra_buf extra_buffer[USBLOG_EXTRA_BUFFER_SIZE];
 };
 
@@ -224,6 +236,10 @@ static const char *ccic_id_string(enum ccic_id id)
 		return "ID_WATER";
 	case NOTIFY_ID_VCONN:
 		return "ID_VCONN";
+	case NOTIFY_ID_OTG:
+		return "ID_OTG";
+	case NOTIFY_ID_TA:
+		return "ID_TA";
 	case NOTIFY_ID_DP_CONNECT:
 		return "ID_DP_CONNECT";
 	case NOTIFY_ID_DP_HPD:
@@ -238,6 +254,8 @@ static const char *ccic_id_string(enum ccic_id id)
 		return "ID_FAC";
 	case NOTIFY_ID_CC_PIN_STATUS:
 		return "ID_PIN_STATUS";
+	case NOTIFY_ID_WATER_CABLE:
+		return "ID_WATER_CABLE";
 	default:
 		return "UNDEFINED";
 	}
@@ -400,6 +418,10 @@ static const char *extra_string(enum extra event)
 		return "SBU VBUS SHORT";
 	case NOTIFY_EXTRA_UVDM_TIMEOUT:
 		return "UVDM TIMEOUT";
+	case NOTIFY_EXTRA_CCOPEN_REQ_SET:
+		return "CC OPEN SET";
+	case NOTIFY_EXTRA_CCOPEN_REQ_CLEAR:
+		return "CC OPEN CLEAR";
 	default:
 		return "ETC";
 	}
@@ -477,6 +499,20 @@ static void print_ccic_event(struct seq_file *m, unsigned long long ts,
 			ccic_id_string(type.id),
 			ccic_dev_string(type.src),
 			ccic_dev_string(type.dest));
+		else if (type.id  == NOTIFY_ID_OTG)
+			seq_printf(m, "[%5lu.%06lu] ccic notify:    id=%s src=%s dest=%s %s\n",
+			(unsigned long)ts, rem_nsec / 1000,
+			ccic_id_string(type.id),
+			ccic_dev_string(type.src),
+			ccic_dev_string(type.dest),
+			type.sub2 ? "Enable":"Disable");
+		else if (type.id  == NOTIFY_ID_TA)
+			seq_printf(m, "[%5lu.%06lu] ccic notify:    id=%s src=%s dest=%s %s\n",
+			(unsigned long)ts, rem_nsec / 1000,
+			ccic_id_string(type.id),
+			ccic_dev_string(type.src),
+			ccic_dev_string(type.dest),
+			ccic_con_string(type.sub1));
 		else if (type.id  == NOTIFY_ID_DP_CONNECT)
 			seq_printf(m, "[%5lu.%06lu] ccic notify:    id=%s src=%s dest=%s 0x%04x/0x%04x %s\n",
 			(unsigned long)ts, rem_nsec / 1000,
@@ -531,6 +567,13 @@ static void print_ccic_event(struct seq_file *m, unsigned long long ts,
 			ccic_dev_string(type.src),
 			ccic_dev_string(type.dest),
 			ccic_pinstatus_string(type.sub1));
+		else if (type.id == NOTIFY_ID_WATER_CABLE)
+			seq_printf(m, "[%5lu.%06lu] ccic notify:	id=%s src=%s dest=%s %s\n",
+			(unsigned long)ts, rem_nsec / 1000,
+			ccic_id_string(type.id),
+			ccic_dev_string(type.src),
+			ccic_dev_string(type.dest),
+			ccic_con_string(type.sub1));
 		else
 			seq_printf(m, "[%5lu.%06lu] ccic notify:    id=%s src=%s dest=%s rprd=%s %s\n",
 			(unsigned long)ts, rem_nsec / 1000,
@@ -596,6 +639,20 @@ static void print_ccic_event(struct seq_file *m, unsigned long long ts,
 			ccic_id_string(type.id),
 			ccic_dev_string(type.src),
 			ccic_dev_string(type.dest));
+		else if (type.id  == NOTIFY_ID_OTG)
+			seq_printf(m, "[%5lu.%06lu] ccic notify:    id=%s src=%s dest=%s %s\n",
+			(unsigned long)ts, rem_nsec / 1000,
+			ccic_id_string(type.id),
+			ccic_dev_string(type.src),
+			ccic_dev_string(type.dest),
+			type.sub2 ? "Enable":"Disable");
+		else if (type.id  == NOTIFY_ID_TA)
+			seq_printf(m, "[%5lu.%06lu] ccic notify:    id=%s src=%s dest=%s %s\n",
+			(unsigned long)ts, rem_nsec / 1000,
+			ccic_id_string(type.id),
+			ccic_dev_string(type.src),
+			ccic_dev_string(type.dest),
+			ccic_con_string(type.sub1));
 		else if (type.id  == NOTIFY_ID_DP_CONNECT)
 			seq_printf(m, "[%5lu.%06lu] manager notify: id=%s src=%s dest=%s 0x%04x/0x%04x %s\n",
 			(unsigned long)ts, rem_nsec / 1000,
@@ -629,7 +686,7 @@ static void print_ccic_event(struct seq_file *m, unsigned long long ts,
 			type.sub1,
 			type.sub2);
 		else if (type.id  == NOTIFY_ID_ROLE_SWAP)
-			seq_printf(m, "[%5lu.%06lu] manager notify: id=%s src=%s dest=%s syb1=%d sub2=%d\n",
+			seq_printf(m, "[%5lu.%06lu] manager notify: id=%s src=%s dest=%s sub1=%d sub2=%d\n",
 			(unsigned long)ts, rem_nsec / 1000,
 			ccic_id_string(type.id),
 			ccic_dev_string(type.src),
@@ -660,7 +717,31 @@ static void print_ccic_event(struct seq_file *m, unsigned long long ts,
 			ccic_con_string(type.sub1));
 		break;
 	default:
-		pr_info("%s undefined event\n", __func__);
+		seq_printf(m, "[%5lu.%06lu] undefined event\n",
+			(unsigned long)ts, rem_nsec / 1000);
+		break;
+	}
+}
+
+static void print_port_string(struct seq_file *m, unsigned long long ts,
+	unsigned long rem_nsec, int type, uint16_t param1, uint16_t param2)
+{
+	switch (type) {
+	case NOTIFY_PORT_CONNECT:
+	case NOTIFY_PORT_DISCONNECT:
+		seq_printf(m, "[%5lu.%06lu] port %s - VID:0x%04x PID:0x%04x\n",
+			(unsigned long)ts, rem_nsec / 1000,
+				(type == NOTIFY_PORT_CONNECT) ?
+					"connect" : "disconnect",
+						param1, param2);
+		break;
+	case NOTIFY_PORT_CLASS:
+		seq_printf(m, "[%5lu.%06lu] device class %d, interface class %d\n",
+			(unsigned long)ts, rem_nsec / 1000, param1, param2);
+		break;
+	default:
+		seq_printf(m, "[%5lu.%06lu] undefined event\n",
+			(unsigned long)ts, rem_nsec / 1000);
 		break;
 	}
 }
@@ -753,6 +834,7 @@ static int usblog_proc_show(struct seq_file *m, void *v)
 			rem_nsec / 1000,
 		temp_usblog_buffer->mode_buffer[i].usbmode_str);
 	}
+
 	seq_printf(m,
 		"\n\n");
 	seq_printf(m,
@@ -779,6 +861,7 @@ static int usblog_proc_show(struct seq_file *m, void *v)
 			rem_nsec / 1000,
 		usbstate_string(temp_usblog_buffer->state_buffer[i].usbstate));
 	}
+
 	seq_printf(m,
 		"\n\n");
 	seq_printf(m,
@@ -807,6 +890,35 @@ static int usblog_proc_show(struct seq_file *m, void *v)
 		event_string(temp_usblog_buffer->event_buffer[i].event),
 		status_string(temp_usblog_buffer->event_buffer[i].enable));
 	}
+
+	seq_printf(m,
+		"\n\n");
+	seq_printf(m,
+		"usblog PORT: count=%llu maxline=%d\n",
+			temp_usblog_buffer->port_count,
+				USBLOG_PORT_BUFFER_SIZE);
+
+	if (temp_usblog_buffer->port_count >= USBLOG_PORT_BUFFER_SIZE) {
+		for (i = temp_usblog_buffer->port_index;
+			i < USBLOG_PORT_BUFFER_SIZE; i++) {
+			ts = temp_usblog_buffer->port_buffer[i].ts_nsec;
+			rem_nsec = do_div(ts, 1000000000);
+			print_port_string(m, ts, rem_nsec,
+				temp_usblog_buffer->port_buffer[i].type,
+				temp_usblog_buffer->port_buffer[i].param1,
+				temp_usblog_buffer->port_buffer[i].param2);
+		}
+	}
+
+	for (i = 0; i < temp_usblog_buffer->port_index; i++) {
+		ts = temp_usblog_buffer->port_buffer[i].ts_nsec;
+		rem_nsec = do_div(ts, 1000000000);
+		print_port_string(m, ts, rem_nsec,
+			temp_usblog_buffer->port_buffer[i].type,
+			temp_usblog_buffer->port_buffer[i].param1,
+			temp_usblog_buffer->port_buffer[i].param2);
+	}
+
 	seq_printf(m,
 		"\n\n");
 	seq_printf(m,
@@ -1095,21 +1207,51 @@ err:
 	return;
 }
 
+void port_store_usblog_notify(int type, void *param1, void *param2)
+{
+	struct port_buf *pt_buffer;
+	unsigned long long *target_count;
+	unsigned long *target_index;
+
+	target_count = &usblog_root.usblog_buffer->port_count;
+	target_index = &usblog_root.usblog_buffer->port_index;
+	pt_buffer = &usblog_root.usblog_buffer->port_buffer[*target_index];
+	if (pt_buffer == NULL) {
+		pr_err("%s target_buffer error\n", __func__);
+		goto err;
+	}
+	pt_buffer->ts_nsec = local_clock();
+	pt_buffer->type = type;
+	if (type == NOTIFY_PORT_CONNECT
+			|| type == NOTIFY_PORT_DISCONNECT) {
+		pt_buffer->param1 = le16_to_cpu(*(__le16 *)(param1));
+		pt_buffer->param2 = le16_to_cpu(*(__le16 *)(param2));
+	} else {
+		pt_buffer->param1 = (uint16_t)(*(__u8 *)(param1));
+		pt_buffer->param2 = (uint16_t)(*(__u8 *)(param2));
+	}
+
+	*target_index = (*target_index+1)%USBLOG_PORT_BUFFER_SIZE;
+	(*target_count)++;
+err:
+	return;
+}
+
 void extra_store_usblog_notify(int type, int *param1)
 {
-	struct extra_buf *ev_buffer;
+	struct extra_buf *ex_buffer;
 	unsigned long long *target_count;
 	unsigned long *target_index;
 
 	target_count = &usblog_root.usblog_buffer->extra_count;
 	target_index = &usblog_root.usblog_buffer->extra_index;
-	ev_buffer = &usblog_root.usblog_buffer->extra_buffer[*target_index];
-	if (ev_buffer == NULL) {
+	ex_buffer = &usblog_root.usblog_buffer->extra_buffer[*target_index];
+	if (ex_buffer == NULL) {
 		pr_err("%s target_buffer error\n", __func__);
 		goto err;
 	}
-	ev_buffer->ts_nsec = local_clock();
-	ev_buffer->event = *param1;
+	ex_buffer->ts_nsec = local_clock();
+	ex_buffer->event = *param1;
 
 	*target_index = (*target_index+1)%USBLOG_EXTRA_BUFFER_SIZE;
 	(*target_count)++;
@@ -1147,6 +1289,10 @@ void store_usblog_notify(int type, void *param1, void *param2)
 		mode_store_usblog_notify(type, (char *)param1);
 	else if (type == NOTIFY_USBSTATE)
 		state_store_usblog_notify(type, (char *)param1);
+	else if (type == NOTIFY_PORT_CONNECT ||
+				type == NOTIFY_PORT_DISCONNECT ||
+					type == NOTIFY_PORT_CLASS)
+		port_store_usblog_notify(type, param1, param2);
 	else if (type == NOTIFY_EXTRA)
 		extra_store_usblog_notify(type, (int *)param1);
 	else

@@ -1819,7 +1819,8 @@ static void __dw_mci_start_request(struct dw_mci *host,
 	mrq = slot->mrq;
 
 	if (mrq->cmd->opcode == MMC_SEND_TUNING_BLOCK ||
-	    mrq->cmd->opcode == MMC_SEND_TUNING_BLOCK_HS200)
+			mrq->cmd->opcode == MMC_SEND_TUNING_BLOCK_HS200 ||
+			mrq->cmd->opcode == SD_APP_SEND_SCR)
 		mod_timer(&host->timer, jiffies + msecs_to_jiffies(500));
 	else if (host->pdata->sw_timeout)
 		mod_timer(&host->timer, jiffies + msecs_to_jiffies(host->pdata->sw_timeout));

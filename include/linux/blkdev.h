@@ -159,7 +159,9 @@ struct request {
 	unsigned int __data_len;	/* total data len */
 	int tag;
 	sector_t __sector;		/* sector cursor */
-
+#ifdef CONFIG_BLK_DEV_CRYPT_DUN
+	u64 __dun;                      /* dun for UFS */
+#endif
 	struct bio *bio;
 	struct bio *biotail;
 
@@ -1037,6 +1039,13 @@ static inline sector_t blk_rq_pos(const struct request *rq)
 {
 	return rq->__sector;
 }
+
+#ifdef CONFIG_BLK_DEV_CRYPT_DUN
+static inline sector_t blk_rq_dun(const struct request *rq)
+{
+	return rq->__dun;
+}
+#endif
 
 static inline unsigned int blk_rq_bytes(const struct request *rq)
 {

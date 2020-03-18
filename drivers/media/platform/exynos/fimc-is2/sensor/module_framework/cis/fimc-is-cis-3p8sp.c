@@ -52,73 +52,64 @@ static u32 sensor_3p8sp_global_size;
 static const u32 **sensor_3p8sp_setfiles;
 static const u32 *sensor_3p8sp_setfile_sizes;
 static u32 sensor_3p8sp_max_setfile_num;
-static const struct sensor_pll_info **sensor_3p8sp_pllinfos;
+static const struct sensor_pll_info_compact **sensor_3p8sp_pllinfos;
 
-static void sensor_3p8sp_cis_data_calculation(const struct sensor_pll_info *pll_info, cis_shared_data *cis_data)
+static void sensor_3p8sp_cis_data_calculation(const struct sensor_pll_info_compact *pll_info_compact, cis_shared_data *cis_data)
 {
-	u32 pll_voc_a = 0, vt_pix_clk_hz = 0;
+	u32 vt_pix_clk_hz = 0;
 	u32 frame_rate = 0, max_fps = 0, frame_valid_us = 0;
-	u64 num = 0;
 
-	FIMC_BUG(!pll_info);
+	BUG_ON(!pll_info_compact);
 
-	/* 1. pixel rate calculation (Mpps) */
-	pll_voc_a = pll_info->ext_clk / pll_info->pre_pll_clk_div * pll_info->pll_multiplier;
-	vt_pix_clk_hz = (pll_voc_a / pll_info->vt_pix_clk_div) * 4;
+	/* 1. get pclk value from pll info */
+	vt_pix_clk_hz = pll_info_compact->pclk;
 
-	dbg_sensor("ext_clock(%d) / pre_pll_clk_div(%d) * pll_multiplier(%d) = pll_voc_a(%d)\n",
-						pll_info->ext_clk, pll_info->pre_pll_clk_div,
-						pll_info->pll_multiplier, pll_voc_a);
-	dbg_sensor("pll_voc_a(%d) / (vt_sys_clk_div(%d) * vt_pix_clk_div(%d)) = pixel clock (%d hz)\n",
-						pll_voc_a, pll_info->vt_sys_clk_div,
-						pll_info->vt_pix_clk_div, vt_pix_clk_hz);
+	dbg_sensor(1, "ext_clock(%d), mipi_datarate(%d), pclk(%d)\n",
+			pll_info_compact->ext_clk, pll_info_compact->mipi_datarate, pll_info_compact->pclk);
 
 	/* 2. the time of processing one frame calculation (us) */
-	cis_data->min_frame_us_time = (pll_info->frame_length_lines * pll_info->line_length_pck
+	cis_data->min_frame_us_time = (pll_info_compact->frame_length_lines * pll_info_compact->line_length_pck
 					/ (vt_pix_clk_hz / (1000 * 1000)));
 	cis_data->cur_frame_us_time = cis_data->min_frame_us_time;
 
 	/* 3. FPS calculation */
-	frame_rate = vt_pix_clk_hz / (pll_info->frame_length_lines * pll_info->line_length_pck);
-	dbg_sensor("frame_rate (%d) = vt_pix_clk_hz(%d) / (frame_length_lines(%d) * line_length_pck(%d))\n",
-		frame_rate, vt_pix_clk_hz, pll_info->frame_length_lines, pll_info->line_length_pck);
+	frame_rate = vt_pix_clk_hz / (pll_info_compact->frame_length_lines * pll_info_compact->line_length_pck);
+	dbg_sensor(1, "frame_rate (%d) = vt_pix_clk_hz(%d) / "
+		KERN_CONT "(pll_info_compact->frame_length_lines(%d) * pll_info_compact->line_length_pck(%d))\n",
+		frame_rate, vt_pix_clk_hz, pll_info_compact->frame_length_lines, pll_info_compact->line_length_pck);
 
 	/* calculate max fps */
-	max_fps = (vt_pix_clk_hz * 10) / (pll_info->frame_length_lines * pll_info->line_length_pck);
+	max_fps = (vt_pix_clk_hz * 10) / (pll_info_compact->frame_length_lines * pll_info_compact->line_length_pck);
 	max_fps = (max_fps % 10 >= 5 ? frame_rate + 1 : frame_rate);
 
 	cis_data->pclk = vt_pix_clk_hz;
 	cis_data->max_fps = max_fps;
-	cis_data->frame_length_lines = pll_info->frame_length_lines;
-	cis_data->line_length_pck = pll_info->line_length_pck;
-
-	num = (u64)cis_data->line_length_pck * (u64)(1000 * 1000 * 1000);
-	cis_data->line_readOut_time = sensor_cis_do_div64(num, cis_data->pclk);
-
+	cis_data->frame_length_lines = pll_info_compact->frame_length_lines;
+	cis_data->line_length_pck = pll_info_compact->line_length_pck;
+	cis_data->line_readOut_time = sensor_cis_do_div64((u64)cis_data->line_length_pck * (u64)(1000 * 1000 * 1000), cis_data->pclk);
 	cis_data->rolling_shutter_skew = (cis_data->cur_height - 1) * cis_data->line_readOut_time;
 	cis_data->stream_on = false;
 
 	/* Frame valid time calcuration */
-	num = (u64)cis_data->cur_height * (u64)cis_data->line_length_pck * (u64)(1000 * 1000);
-	frame_valid_us = sensor_cis_do_div64(num, cis_data->pclk);
+	frame_valid_us = sensor_cis_do_div64((u64)cis_data->cur_height * (u64)cis_data->line_length_pck * (u64)(1000 * 1000), cis_data->pclk);
 	cis_data->frame_valid_us_time = (int)frame_valid_us;
 
-	dbg_sensor("%s\n", __func__);
-	dbg_sensor("Sensor size(%d x %d) setting: SUCCESS!\n",
+	dbg_sensor(1, "%s\n", __func__);
+	dbg_sensor(1, "Sensor size(%d x %d) setting: SUCCESS!\n",
 					cis_data->cur_width, cis_data->cur_height);
-	dbg_sensor("Frame Valid(us): %d\n", frame_valid_us);
-	dbg_sensor("rolling_shutter_skew: %lld\n", cis_data->rolling_shutter_skew);
+	dbg_sensor(1, "Frame Valid(us): %d\n", frame_valid_us);
+	dbg_sensor(1, "rolling_shutter_skew: %lld\n", cis_data->rolling_shutter_skew);
 
-	dbg_sensor("Fps: %d, max fps(%d)\n", frame_rate, cis_data->max_fps);
-	dbg_sensor("min_frame_time(%d us)\n", cis_data->min_frame_us_time);
-	dbg_sensor("Pixel rate(Mbps): %d\n", cis_data->pclk / 1000000);
+	dbg_sensor(1, "Fps: %d, max fps(%d)\n", frame_rate, cis_data->max_fps);
+	dbg_sensor(1, "min_frame_time(%d us)\n", cis_data->min_frame_us_time);
+	dbg_sensor(1, "Pixel rate(Mbps): %d\n", cis_data->pclk / 1000000);
 
 	/* Frame period calculation */
 	cis_data->frame_time = (cis_data->line_readOut_time * cis_data->cur_height / 1000);
 	cis_data->rolling_shutter_skew = (cis_data->cur_height - 1) * cis_data->line_readOut_time;
 
-	dbg_sensor("[%s] frame_time(%d), rolling_shutter_skew(%lld)\n",
-		__func__, cis_data->frame_time, cis_data->rolling_shutter_skew);
+	dbg_sensor(1, "[%s] frame_time(%d), rolling_shutter_skew(%lld)\n", __func__,
+		cis_data->frame_time, cis_data->rolling_shutter_skew);
 
 	/* Constant values */
 	cis_data->min_fine_integration_time = SENSOR_3P8SP_FINE_INTEGRATION_TIME_MIN;
@@ -159,6 +150,10 @@ int sensor_3p8sp_cis_init(struct v4l2_subdev *subdev)
 	struct fimc_is_cis *cis;
 	u32 setfile_index = 0;
 	cis_setting_info setinfo;
+#ifdef USE_CAMERA_HW_BIG_DATA
+	struct cam_hw_param *hw_param = NULL;
+	struct fimc_is_device_sensor_peri *sensor_peri = NULL;
+#endif
 
 	setinfo.param = NULL;
 
@@ -179,6 +174,13 @@ int sensor_3p8sp_cis_init(struct v4l2_subdev *subdev)
 
 	ret = sensor_cis_check_rev(cis);
 	if (ret < 0) {
+#ifdef USE_CAMERA_HW_BIG_DATA
+		sensor_peri = container_of(cis, struct fimc_is_device_sensor_peri, cis);
+		if (sensor_peri)
+			fimc_is_sec_get_hw_param(&hw_param, sensor_peri->module->position);
+		if (hw_param)
+			hw_param->i2c_sensor_err_cnt++;
+#endif
 		warn("sensor_3p8sp_check_rev is fail when cis init");
 		cis->rev_flag = true;
 		ret = 0;
@@ -193,27 +195,22 @@ int sensor_3p8sp_cis_init(struct v4l2_subdev *subdev)
 
 	setinfo.return_value = 0;
 	CALL_CISOPS(cis, cis_get_min_exposure_time, subdev, &setinfo.return_value);
-	dbg_sensor("[%s] min exposure time : %d\n", __func__, setinfo.return_value);
+	dbg_sensor(1, "[%s] min exposure time : %d\n", __func__, setinfo.return_value);
 	setinfo.return_value = 0;
 	CALL_CISOPS(cis, cis_get_max_exposure_time, subdev, &setinfo.return_value);
-	dbg_sensor("[%s] max exposure time : %d\n", __func__, setinfo.return_value);
+	dbg_sensor(1, "[%s] max exposure time : %d\n", __func__, setinfo.return_value);
 	setinfo.return_value = 0;
 	CALL_CISOPS(cis, cis_get_min_analog_gain, subdev, &setinfo.return_value);
-	dbg_sensor("[%s] min again : %d\n", __func__, setinfo.return_value);
+	dbg_sensor(1, "[%s] min again : %d\n", __func__, setinfo.return_value);
 	setinfo.return_value = 0;
 	CALL_CISOPS(cis, cis_get_max_analog_gain, subdev, &setinfo.return_value);
-	dbg_sensor("[%s] max again : %d\n", __func__, setinfo.return_value);
+	dbg_sensor(1, "[%s] max again : %d\n", __func__, setinfo.return_value);
 	setinfo.return_value = 0;
 	CALL_CISOPS(cis, cis_get_min_digital_gain, subdev, &setinfo.return_value);
-	dbg_sensor("[%s] min dgain : %d\n", __func__, setinfo.return_value);
+	dbg_sensor(1, "[%s] min dgain : %d\n", __func__, setinfo.return_value);
 	setinfo.return_value = 0;
 	CALL_CISOPS(cis, cis_get_max_digital_gain, subdev, &setinfo.return_value);
-	dbg_sensor("[%s] max dgain : %d\n", __func__, setinfo.return_value);
-
-#ifdef DEBUG_SENSOR_TIME
-	do_gettimeofday(&end);
-	dbg_sensor("[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
-#endif
+	dbg_sensor(1, "[%s] max dgain : %d\n", __func__, setinfo.return_value);
 
 p_err:
 	return ret;
@@ -246,19 +243,19 @@ int sensor_3p8sp_cis_log_status(struct v4l2_subdev *subdev)
 	pr_err("[SEN:DUMP] *******************************\n");
 	ret = fimc_is_sensor_read16(client, 0x0000, &data16);
 	if (unlikely(!ret))
-		dbg_sensor("[SEN:DUMP] model_id(%x)\n", data16);
+		dbg_sensor(1, "[SEN:DUMP] model_id(%x)\n", data16);
 
 	ret = fimc_is_sensor_read8(client, 0x0002, &data8);
 	if (unlikely(!ret))
-		dbg_sensor("[SEN:DUMP] revision_number(%x)\n", data8);
+		dbg_sensor(1, "[SEN:DUMP] revision_number(%x)\n", data8);
 
 	ret = fimc_is_sensor_read8(client, 0x0005, &data8);
 	if (unlikely(!ret))
-		dbg_sensor("[SEN:DUMP] frame_count(%x)\n", data8);
+		dbg_sensor(1, "[SEN:DUMP] frame_count(%x)\n", data8);
 
 	ret = fimc_is_sensor_read8(client, 0x0100, &data8);
 	if (unlikely(!ret))
-		dbg_sensor("[SEN:DUMP] mode_select(%x)\n", data8);
+		dbg_sensor(1, "[SEN:DUMP] mode_select(%x)\n", data8);
 
 	sensor_cis_dump_registers(subdev, sensor_3p8sp_setfiles[0], sensor_3p8sp_setfile_sizes[0]);
 
@@ -358,7 +355,7 @@ int sensor_3p8sp_cis_set_global_setting(struct v4l2_subdev *subdev)
 		goto p_err;
 	}
 
-	dbg_sensor("[%s] global setting done\n", __func__);
+	dbg_sensor(1, "[%s] global setting done\n", __func__);
 
 p_err:
 	return ret;
@@ -402,7 +399,7 @@ int sensor_3p8sp_cis_mode_change(struct v4l2_subdev *subdev, u32 mode)
 		goto p_err;
 	}
 
-	dbg_sensor("[%s] mode changed(%d)\n", __func__, mode);
+	dbg_sensor(1, "[%s] mode changed(%d)\n", __func__, mode);
 
 p_err:
 	return ret;
@@ -428,7 +425,7 @@ int sensor_3p8sp_cis_set_size(struct v4l2_subdev *subdev, cis_shared_data *cis_d
 	cis = (struct fimc_is_cis *)v4l2_get_subdevdata(subdev);
 	FIMC_BUG(!cis);
 
-	dbg_sensor("[MOD:D:%d] %s\n", cis->id, __func__);
+	dbg_sensor(1, "[MOD:D:%d] %s\n", cis->id, __func__);
 
 	if (unlikely(!cis_data)) {
 		err("cis data is NULL");
@@ -511,7 +508,7 @@ int sensor_3p8sp_cis_set_size(struct v4l2_subdev *subdev, cis_shared_data *cis_d
 
 	/* If not use to binning, sensor image should set only crop */
 	if (!binning) {
-		dbg_sensor("Sensor size set is not binning\n");
+		dbg_sensor(1, "Sensor size set is not binning\n");
 		goto p_err;
 	}
 
@@ -555,12 +552,12 @@ int sensor_3p8sp_cis_set_size(struct v4l2_subdev *subdev, cis_shared_data *cis_d
 
 	cis_data->frame_time = (cis_data->line_readOut_time * cis_data->cur_height / 1000);
 	cis->cis_data->rolling_shutter_skew = (cis->cis_data->cur_height - 1) * cis->cis_data->line_readOut_time;
-	dbg_sensor("[%s] frame_time(%d), rolling_shutter_skew(%lld)\n", __func__,
+	dbg_sensor(1, "[%s] frame_time(%d), rolling_shutter_skew(%lld)\n", __func__,
 		cis->cis_data->frame_time, cis->cis_data->rolling_shutter_skew);
 
 #ifdef DEBUG_SENSOR_TIME
 	do_gettimeofday(&end);
-	dbg_sensor("[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec) * 1000000 + (end.tv_usec - st.tv_usec));
+	dbg_sensor(1, "[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec) * 1000000 + (end.tv_usec - st.tv_usec));
 #endif
 
 p_err:
@@ -595,7 +592,7 @@ int sensor_3p8sp_cis_stream_on(struct v4l2_subdev *subdev)
 
 	cis_data = cis->cis_data;
 
-	dbg_sensor("[MOD:D:%d] %s\n", cis->id, __func__);
+	dbg_sensor(1, "[MOD:D:%d] %s\n", cis->id, __func__);
 
 	ret = sensor_3p8sp_cis_group_param_hold_func(subdev, 0x00);
 	if (ret < 0)
@@ -606,26 +603,26 @@ int sensor_3p8sp_cis_stream_on(struct v4l2_subdev *subdev)
 	u16 pll;
 
 	ret = fimc_is_sensor_read16(client, 0x0300, &pll);
-	dbg_sensor("______ vt_pix_clk_div(%x)\n", pll);
+	dbg_sensor(1, "______ vt_pix_clk_div(%x)\n", pll);
 	ret = fimc_is_sensor_read16(client, 0x0302, &pll);
-	dbg_sensor("______ vt_sys_clk_div(%x)\n", pll);
+	dbg_sensor(1, "______ vt_sys_clk_div(%x)\n", pll);
 	ret = fimc_is_sensor_read16(client, 0x0304, &pll);
-	dbg_sensor("______ pre_pll_clk_div(%x)\n", pll);
+	dbg_sensor(1, "______ pre_pll_clk_div(%x)\n", pll);
 	ret = fimc_is_sensor_read16(client, 0x0306, &pll);
-	dbg_sensor("______ pll_multiplier(%x)\n", pll);
+	dbg_sensor(1, "______ pll_multiplier(%x)\n", pll);
 	ret = fimc_is_sensor_read16(client, 0x0308, &pll);
-	dbg_sensor("______ op_pix_clk_div(%x)\n", pll);
+	dbg_sensor(1, "______ op_pix_clk_div(%x)\n", pll);
 	ret = fimc_is_sensor_read16(client, 0x030a, &pll);
-	dbg_sensor("______ op_sys_clk_div(%x)\n", pll);
+	dbg_sensor(1, "______ op_sys_clk_div(%x)\n", pll);
 
 	ret = fimc_is_sensor_read16(client, 0x030c, &pll);
-	dbg_sensor("______ secnd_pre_pll_clk_div(%x)\n", pll);
+	dbg_sensor(1, "______ secnd_pre_pll_clk_div(%x)\n", pll);
 	ret = fimc_is_sensor_read16(client, 0x030e, &pll);
-	dbg_sensor("______ secnd_pll_multiplier(%x)\n", pll);
+	dbg_sensor(1, "______ secnd_pll_multiplier(%x)\n", pll);
 	ret = fimc_is_sensor_read16(client, 0x0340, &pll);
-	dbg_sensor("______ frame_length_lines(%x)\n", pll);
+	dbg_sensor(1, "______ frame_length_lines(%x)\n", pll);
 	ret = fimc_is_sensor_read16(client, 0x0342, &pll);
-	dbg_sensor("______ line_length_pck(%x)\n", pll);
+	dbg_sensor(1, "______ line_length_pck(%x)\n", pll);
 	}
 #endif
 
@@ -641,7 +638,7 @@ int sensor_3p8sp_cis_stream_on(struct v4l2_subdev *subdev)
 
 #ifdef DEBUG_SENSOR_TIME
 	do_gettimeofday(&end);
-	dbg_sensor("[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
+	dbg_sensor(1, "[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
 #endif
 
 p_err:
@@ -677,7 +674,7 @@ int sensor_3p8sp_cis_stream_off(struct v4l2_subdev *subdev)
 
 	cis_data = cis->cis_data;
 
-	dbg_sensor("[MOD:D:%d] %s\n", cis->id, __func__);
+	dbg_sensor(1, "[MOD:D:%d] %s\n", cis->id, __func__);
 
 	ret = sensor_3p8sp_cis_group_param_hold_func(subdev, 0x00);
 	if (ret < 0)
@@ -695,7 +692,7 @@ int sensor_3p8sp_cis_stream_off(struct v4l2_subdev *subdev)
 
 #ifdef DEBUG_SENSOR_TIME
 	do_gettimeofday(&end);
-	dbg_sensor("[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
+	dbg_sensor(1, "[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
 #endif
 
 p_err:
@@ -746,7 +743,7 @@ int sensor_3p8sp_cis_set_exposure_time(struct v4l2_subdev *subdev, struct ae_par
 
 	cis_data = cis->cis_data;
 
-	dbg_sensor("[MOD:D:%d] %s, vsync_cnt(%d), target long(%d), short(%d)\n", cis->id, __func__,
+	dbg_sensor(1, "[MOD:D:%d] %s, vsync_cnt(%d), target long(%d), short(%d)\n", cis->id, __func__,
 			cis_data->sen_vsync_count, target_exposure->long_val, target_exposure->short_val);
 
 	vt_pic_clk_freq_mhz = cis_data->pclk / (1000 * 1000);
@@ -757,25 +754,25 @@ int sensor_3p8sp_cis_set_exposure_time(struct v4l2_subdev *subdev, struct ae_par
 	short_coarse_int = ((target_exposure->short_val * vt_pic_clk_freq_mhz) - min_fine_int) / line_length_pck;
 
 	if (long_coarse_int > cis_data->max_coarse_integration_time) {
-		dbg_sensor("[MOD:D:%d] %s, vsync_cnt(%d), long coarse(%d) max(%d)\n", cis->id, __func__,
+		dbg_sensor(1, "[MOD:D:%d] %s, vsync_cnt(%d), long coarse(%d) max(%d)\n", cis->id, __func__,
 			cis_data->sen_vsync_count, long_coarse_int, cis_data->max_coarse_integration_time);
 		long_coarse_int = cis_data->max_coarse_integration_time;
 	}
 
 	if (short_coarse_int > cis_data->max_coarse_integration_time) {
-		dbg_sensor("[MOD:D:%d] %s, vsync_cnt(%d), short coarse(%d) max(%d)\n", cis->id, __func__,
+		dbg_sensor(1, "[MOD:D:%d] %s, vsync_cnt(%d), short coarse(%d) max(%d)\n", cis->id, __func__,
 			cis_data->sen_vsync_count, short_coarse_int, cis_data->max_coarse_integration_time);
 		short_coarse_int = cis_data->max_coarse_integration_time;
 	}
 
 	if (long_coarse_int < cis_data->min_coarse_integration_time) {
-		dbg_sensor("[MOD:D:%d] %s, vsync_cnt(%d), long coarse(%d) min(%d)\n", cis->id, __func__,
+		dbg_sensor(1, "[MOD:D:%d] %s, vsync_cnt(%d), long coarse(%d) min(%d)\n", cis->id, __func__,
 			cis_data->sen_vsync_count, long_coarse_int, cis_data->min_coarse_integration_time);
 		long_coarse_int = cis_data->min_coarse_integration_time;
 	}
 
 	if (short_coarse_int < cis_data->min_coarse_integration_time) {
-		dbg_sensor("[MOD:D:%d] %s, vsync_cnt(%d), short coarse(%d) min(%d)\n", cis->id, __func__,
+		dbg_sensor(1, "[MOD:D:%d] %s, vsync_cnt(%d), short coarse(%d) min(%d)\n", cis->id, __func__,
 			cis_data->sen_vsync_count, short_coarse_int, cis_data->min_coarse_integration_time);
 		short_coarse_int = cis_data->min_coarse_integration_time;
 	}
@@ -791,15 +788,15 @@ int sensor_3p8sp_cis_set_exposure_time(struct v4l2_subdev *subdev, struct ae_par
 	if (ret < 0)
 		goto p_err;
 
-	dbg_sensor("[MOD:D:%d] %s, vsync_cnt(%d), vt_pic_clk_freq_mhz (%d), line_length_pck(%d), min_fine_int (%d)\n",
+	dbg_sensor(1, "[MOD:D:%d] %s, vsync_cnt(%d), vt_pic_clk_freq_mhz (%d), line_length_pck(%d), min_fine_int (%d)\n",
 		cis->id, __func__, cis_data->sen_vsync_count, vt_pic_clk_freq_mhz, line_length_pck, min_fine_int);
-	dbg_sensor("[MOD:D:%d] %s, vsync_cnt(%d), frame_length_lines(%#x), long_coarse_int %#x, short_coarse_int %#x\n",
+	dbg_sensor(1, "[MOD:D:%d] %s, vsync_cnt(%d), frame_length_lines(%#x), long_coarse_int %#x, short_coarse_int %#x\n",
 		cis->id, __func__, cis_data->sen_vsync_count, cis_data->frame_length_lines,
 		long_coarse_int, short_coarse_int);
 
 #ifdef DEBUG_SENSOR_TIME
 	do_gettimeofday(&end);
-	dbg_sensor("[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
+	dbg_sensor(1, "[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
 #endif
 
 p_err:
@@ -851,11 +848,11 @@ int sensor_3p8sp_cis_get_min_exposure_time(struct v4l2_subdev *subdev, u32 *min_
 	min_integration_time = ((line_length_pck * min_coarse) + min_fine) / vt_pic_clk_freq_mhz;
 	*min_expo = min_integration_time;
 
-	dbg_sensor("[%s] min integration time %d\n", __func__, min_integration_time);
+	dbg_sensor(1, "[%s] min integration time %d\n", __func__, min_integration_time);
 
 #ifdef DEBUG_SENSOR_TIME
 	do_gettimeofday(&end);
-	dbg_sensor("[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
+	dbg_sensor(1, "[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
 #endif
 
 p_err:
@@ -913,13 +910,13 @@ int sensor_3p8sp_cis_get_max_exposure_time(struct v4l2_subdev *subdev, u32 *max_
 	cis_data->max_margin_fine_integration_time = max_fine_margin;
 	cis_data->max_coarse_integration_time = max_coarse;
 
-	dbg_sensor("[%s] max integration time %d, max margin fine integration %d, max coarse integration %d\n",
+	dbg_sensor(1, "[%s] max integration time %d, max margin fine integration %d, max coarse integration %d\n",
 		__func__, max_integration_time, cis_data->max_margin_fine_integration_time,
 		cis_data->max_coarse_integration_time);
 
 #ifdef DEBUG_SENSOR_TIME
 	do_gettimeofday(&end);
-	dbg_sensor("[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
+	dbg_sensor(1, "[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
 #endif
 
 p_err:
@@ -962,17 +959,21 @@ int sensor_3p8sp_cis_adjust_frame_duration(struct v4l2_subdev *subdev,
 
 	frame_duration = (frame_length_lines * line_length_pck) / vt_pic_clk_freq_mhz;
 
-	dbg_sensor("[%s](vsync cnt = %d) input exp(%d), adj duration, frame duraion(%d), min_frame_us(%d)\n",
+	dbg_sensor(1, "[%s](vsync cnt = %d) input exp(%d), adj duration, frame duraion(%d), min_frame_us(%d)\n",
 			__func__, cis_data->sen_vsync_count, input_exposure_time,
 			frame_duration, cis_data->min_frame_us_time);
-	dbg_sensor("[%s](vsync cnt = %d) adj duration, frame duraion(%d), min_frame_us(%d)\n",
+	dbg_sensor(1, "[%s](vsync cnt = %d) adj duration, frame duraion(%d), min_frame_us(%d)\n",
 			__func__, cis_data->sen_vsync_count, frame_duration, cis_data->min_frame_us_time);
 
-	*target_duration = MAX(frame_duration, cis_data->min_frame_us_time);
+	if(input_exposure_time <= cis_data->min_frame_us_time)
+		*target_duration = cis_data->min_frame_us_time;
+	else
+		*target_duration = MAX(frame_duration, cis_data->min_frame_us_time);
+
 
 #ifdef DEBUG_SENSOR_TIME
 	do_gettimeofday(&end);
-	dbg_sensor("[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
+	dbg_sensor(1, "[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
 #endif
 
 	return ret;
@@ -1015,7 +1016,7 @@ int sensor_3p8sp_cis_set_frame_duration(struct v4l2_subdev *subdev, u32 frame_du
 	cis_data = cis->cis_data;
 
 	if (frame_duration < cis_data->min_frame_us_time) {
-		dbg_sensor("frame duration is less than min(%d)\n", frame_duration);
+		dbg_sensor(1, "frame duration is less than min(%d)\n", frame_duration);
 		frame_duration = cis_data->min_frame_us_time;
 	}
 
@@ -1024,7 +1025,7 @@ int sensor_3p8sp_cis_set_frame_duration(struct v4l2_subdev *subdev, u32 frame_du
 
 	frame_length_lines = (u16)((vt_pic_clk_freq_mhz * frame_duration) / line_length_pck);
 
-	dbg_sensor("[MOD:D:%d] %s, vt_pic_clk_freq_mhz(%#x) frame_duration = %d us, "
+	dbg_sensor(1, "[MOD:D:%d] %s, vt_pic_clk_freq_mhz(%#x) frame_duration = %d us, "
 		KERN_CONT "(line_length_pck%#x), frame_length_lines(%#x)\n",
 		cis->id, __func__, vt_pic_clk_freq_mhz, frame_duration, line_length_pck, frame_length_lines);
 
@@ -1046,7 +1047,7 @@ int sensor_3p8sp_cis_set_frame_duration(struct v4l2_subdev *subdev, u32 frame_du
 
 #ifdef DEBUG_SENSOR_TIME
 	do_gettimeofday(&end);
-	dbg_sensor("[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
+	dbg_sensor(1, "[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
 #endif
 
 p_err:
@@ -1096,7 +1097,7 @@ int sensor_3p8sp_cis_set_frame_rate(struct v4l2_subdev *subdev, u32 min_fps)
 
 	frame_duration = (1 * 1000 * 1000) / min_fps;
 
-	dbg_sensor("[MOD:D:%d] %s, set FPS(%d), frame duration(%d)\n",
+	dbg_sensor(1, "[MOD:D:%d] %s, set FPS(%d), frame duration(%d)\n",
 			cis->id, __func__, min_fps, frame_duration);
 
 	ret = sensor_3p8sp_cis_set_frame_duration(subdev, frame_duration);
@@ -1110,7 +1111,7 @@ int sensor_3p8sp_cis_set_frame_rate(struct v4l2_subdev *subdev, u32 min_fps)
 
 #ifdef DEBUG_SENSOR_TIME
 	do_gettimeofday(&end);
-	dbg_sensor("[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
+	dbg_sensor(1, "[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
 #endif
 
 p_err:
@@ -1152,7 +1153,7 @@ int sensor_3p8sp_cis_adjust_analog_gain(struct v4l2_subdev *subdev, u32 input_ag
 
 	again_permile = sensor_cis_calc_again_permile(again_code);
 
-	dbg_sensor("[%s] min again(%d), max(%d), input_again(%d), code(%d), permile(%d)\n", __func__,
+	dbg_sensor(1, "[%s] min again(%d), max(%d), input_again(%d), code(%d), permile(%d)\n", __func__,
 			cis_data->max_analog_gain[0],
 			cis_data->min_analog_gain[0],
 			input_again,
@@ -1201,7 +1202,7 @@ int sensor_3p8sp_cis_set_analog_gain(struct v4l2_subdev *subdev, struct ae_param
 	if (analog_gain > cis->cis_data->max_analog_gain[0])
 		analog_gain = cis->cis_data->max_analog_gain[0];
 
-	dbg_sensor("[MOD:D:%d] %s(vsync cnt = %d), input_again = %d us, analog_gain(%#x)\n",
+	dbg_sensor(1, "[MOD:D:%d] %s(vsync cnt = %d), input_again = %d us, analog_gain(%#x)\n",
 		cis->id, __func__, cis->cis_data->sen_vsync_count, again->val, analog_gain);
 
 	hold = sensor_3p8sp_cis_group_param_hold_func(subdev, 0x01);
@@ -1216,7 +1217,7 @@ int sensor_3p8sp_cis_set_analog_gain(struct v4l2_subdev *subdev, struct ae_param
 
 #ifdef DEBUG_SENSOR_TIME
 	do_gettimeofday(&end);
-	dbg_sensor("[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
+	dbg_sensor(1, "[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
 #endif
 
 p_err:
@@ -1270,12 +1271,12 @@ int sensor_3p8sp_cis_get_analog_gain(struct v4l2_subdev *subdev, u32 *again)
 
 	*again = sensor_cis_calc_again_permile(analog_gain);
 
-	dbg_sensor("[MOD:D:%d] %s, cur_again = %d us, analog_gain(%#x)\n",
+	dbg_sensor(1, "[MOD:D:%d] %s, cur_again = %d us, analog_gain(%#x)\n",
 			cis->id, __func__, *again, analog_gain);
 
 #ifdef DEBUG_SENSOR_TIME
 	do_gettimeofday(&end);
-	dbg_sensor("[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
+	dbg_sensor(1, "[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
 #endif
 
 p_err:
@@ -1330,11 +1331,11 @@ int sensor_3p8sp_cis_get_min_analog_gain(struct v4l2_subdev *subdev, u32 *min_ag
 
 	*min_again = cis_data->min_analog_gain[1];
 
-	dbg_sensor("[%s] code %d, permile %d\n", __func__, cis_data->min_analog_gain[0], cis_data->min_analog_gain[1]);
+	dbg_sensor(1, "[%s] code %d, permile %d\n", __func__, cis_data->min_analog_gain[0], cis_data->min_analog_gain[1]);
 
 #ifdef DEBUG_SENSOR_TIME
 	do_gettimeofday(&end);
-	dbg_sensor("[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
+	dbg_sensor(1, "[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
 #endif
 
 p_err:
@@ -1383,11 +1384,11 @@ int sensor_3p8sp_cis_get_max_analog_gain(struct v4l2_subdev *subdev, u32 *max_ag
 
 	*max_again = cis_data->max_analog_gain[1];
 
-	dbg_sensor("[%s] code %d, permile %d\n", __func__, cis_data->max_analog_gain[0], cis_data->max_analog_gain[1]);
+	dbg_sensor(1, "[%s] code %d, permile %d\n", __func__, cis_data->max_analog_gain[0], cis_data->max_analog_gain[1]);
 
 #ifdef DEBUG_SENSOR_TIME
 	do_gettimeofday(&end);
-	dbg_sensor("[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
+	dbg_sensor(1, "[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
 #endif
 
 p_err:
@@ -1444,7 +1445,7 @@ int sensor_3p8sp_cis_set_digital_gain(struct v4l2_subdev *subdev, struct ae_para
 	if (short_gain > cis->cis_data->max_digital_gain[0])
 		short_gain = cis->cis_data->max_digital_gain[0];
 
-	dbg_sensor("[MOD:D:%d] %s(vsync cnt = %d), input_dgain = %d/%d us, long_gain(%#x), short_gain(%#x)\n",
+	dbg_sensor(1, "[MOD:D:%d] %s(vsync cnt = %d), input_dgain = %d/%d us, long_gain(%#x), short_gain(%#x)\n",
 		cis->id, __func__, cis->cis_data->sen_vsync_count, dgain->long_val, dgain->short_val,
 		long_gain, short_gain);
 
@@ -1462,7 +1463,7 @@ int sensor_3p8sp_cis_set_digital_gain(struct v4l2_subdev *subdev, struct ae_para
 
 #ifdef DEBUG_SENSOR_TIME
 	do_gettimeofday(&end);
-	dbg_sensor("[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
+	dbg_sensor(1, "[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
 #endif
 
 p_err:
@@ -1516,12 +1517,12 @@ int sensor_3p8sp_cis_get_digital_gain(struct v4l2_subdev *subdev, u32 *dgain)
 
 	*dgain = sensor_cis_calc_dgain_permile(digital_gain);
 
-	dbg_sensor("[MOD:D:%d] %s, cur_dgain = %d us, digital_gain(%#x)\n",
+	dbg_sensor(1, "[MOD:D:%d] %s, cur_dgain = %d us, digital_gain(%#x)\n",
 			cis->id, __func__, *dgain, digital_gain);
 
 #ifdef DEBUG_SENSOR_TIME
 	do_gettimeofday(&end);
-	dbg_sensor("[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
+	dbg_sensor(1, "[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
 #endif
 
 p_err:
@@ -1563,12 +1564,12 @@ int sensor_3p8sp_cis_get_min_digital_gain(struct v4l2_subdev *subdev, u32 *min_d
 
 	*min_dgain = cis_data->min_digital_gain[1];
 
-	dbg_sensor("[%s] code %d, permile %d\n", __func__,
+	dbg_sensor(1, "[%s] code %d, permile %d\n", __func__,
 		cis_data->min_digital_gain[0], cis_data->min_digital_gain[1]);
 
 #ifdef DEBUG_SENSOR_TIME
 	do_gettimeofday(&end);
-	dbg_sensor("[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
+	dbg_sensor(1, "[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
 #endif
 
 	return ret;
@@ -1603,12 +1604,12 @@ int sensor_3p8sp_cis_get_max_digital_gain(struct v4l2_subdev *subdev, u32 *max_d
 
 	*max_dgain = cis_data->max_digital_gain[1];
 
-	dbg_sensor("[%s] code %d, permile %d\n", __func__,
+	dbg_sensor(1, "[%s] code %d, permile %d\n", __func__,
 		cis_data->max_digital_gain[0], cis_data->max_digital_gain[1]);
 
 #ifdef DEBUG_SENSOR_TIME
 	do_gettimeofday(&end);
-	dbg_sensor("[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
+	dbg_sensor(1, "[%s] time %lu us\n", __func__, (end.tv_sec - st.tv_sec)*1000000 + (end.tv_usec - st.tv_usec));
 #endif
 
 	return ret;
@@ -1641,6 +1642,7 @@ static struct fimc_is_cis_ops cis_ops = {
 	.cis_compensate_gain_for_extremely_br = sensor_cis_compensate_gain_for_extremely_br,
 	.cis_wait_streamoff = sensor_cis_wait_streamoff,
 	.cis_wait_streamon = sensor_cis_wait_streamon,
+	.cis_set_initial_exposure = sensor_cis_set_initial_exposure,
 };
 
 static int cis_3p8sp_probe(struct i2c_client *client,
@@ -1682,7 +1684,7 @@ static int cis_3p8sp_probe(struct i2c_client *client,
 
 	sensor_peri = find_peri_by_cis_id(device, SENSOR_NAME_S5K3P8SP);
 	if (!sensor_peri) {
-		probe_info("sensor peri is net yet probed");
+		probe_info("sensor peri is not yet probed");
 		return -EPROBE_DEFER;
 	}
 
@@ -1724,13 +1726,16 @@ static int cis_3p8sp_probe(struct i2c_client *client,
 		if (ret)
 			warn("f-number read is fail(%d)", ret);
 	} else {
-		cis->aperture_num = F1_9;
+		cis->aperture_num = F2_0;
 	}
 
 	probe_info("%s f-number %d\n", __func__, cis->aperture_num);
 
 	cis->use_dgain = true;
 	cis->hdr_ctrl_by_again = false;
+
+	cis->use_initial_ae = of_property_read_bool(dnode, "use_initial_ae");
+	probe_info("%s use_initial_ae(%d)\n", __func__, cis->use_initial_ae);
 
 	ret = of_property_read_string(dnode, "setfile", &setfile);
 	if (ret) {
@@ -1740,7 +1745,7 @@ static int cis_3p8sp_probe(struct i2c_client *client,
 
 	if (strcmp(setfile, "default") == 0 ||
 			strcmp(setfile, "setA") == 0) {
-		probe_info("%s : setfile_A for Non-PDAF\n", __func__);
+		probe_info("%s : setfile_A\n", __func__);
 		sensor_3p8sp_global = sensor_3p8sp_setfile_A_Global;
 		sensor_3p8sp_global_size = ARRAY_SIZE(sensor_3p8sp_setfile_A_Global);
 		sensor_3p8sp_setfiles = sensor_3p8sp_setfiles_A;
@@ -1748,7 +1753,7 @@ static int cis_3p8sp_probe(struct i2c_client *client,
 		sensor_3p8sp_max_setfile_num = ARRAY_SIZE(sensor_3p8sp_setfiles_A);
 		sensor_3p8sp_pllinfos = sensor_3p8sp_pllinfos_A;
 	} else if (strcmp(setfile, "setB") == 0) {
-		probe_info("%s setfile_B for PDAF\n", __func__);
+		probe_info("%s setfile_B\n", __func__);
 		sensor_3p8sp_global = sensor_3p8sp_setfile_B_Global;
 		sensor_3p8sp_global_size = ARRAY_SIZE(sensor_3p8sp_setfile_B_Global);
 		sensor_3p8sp_setfiles = sensor_3p8sp_setfiles_B;

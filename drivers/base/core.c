@@ -2837,6 +2837,7 @@ void device_shutdown(void)
 		dev = list_entry(devices_kset->list.prev, struct device,
 				kobj.entry);
 
+		sec_debug_set_shutdown_device(__func__, dev_name(dev));
 		/*
 		 * hold reference count of device's parent to
 		 * prevent it from being freed because parent's
@@ -2898,6 +2899,7 @@ void device_shutdown(void)
 		spin_lock(&devices_kset->list_lock);
 	}
 
+	sec_debug_set_shutdown_device(NULL, NULL);
 	sec_debug_set_task_in_dev_shutdown(0);
 	spin_unlock(&devices_kset->list_lock);
 }

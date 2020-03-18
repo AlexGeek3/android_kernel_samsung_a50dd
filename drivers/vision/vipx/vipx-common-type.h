@@ -11,9 +11,8 @@
 #ifndef __VIPX_COMMON_TYPE_H__
 #define __VIPX_COMMON_TYPE_H__
 
-#define MAX_INPUT_NUM			(8)
-#define MAX_OUTPUT_NUM			(8)
-#define MAX_PLANE_NUM			(3)
+#define MAX_INPUT_NUM			(24)
+#define MAX_OUTPUT_NUM			(24)
 
 #define GET_COMMON_GRAPH_MODEL_ID(X)	({	\
 	union vipx_common_global_id temp_id;	\
@@ -74,8 +73,8 @@ struct vipx_common_execute_info {
 	unsigned int			macro_sg_offset;
 	unsigned int			num_input;
 	unsigned int			num_output;
-	struct vipx_common_mem		input[MAX_INPUT_NUM][MAX_PLANE_NUM];
-	struct vipx_common_mem		output[MAX_OUTPUT_NUM][MAX_PLANE_NUM];
+	struct vipx_common_mem		input[MAX_INPUT_NUM];
+	struct vipx_common_mem		output[MAX_OUTPUT_NUM];
 	unsigned int			user_para_size;
 	unsigned int			reserved;
 	struct vipx_common_mem		user_param_buffer;

@@ -547,7 +547,7 @@ void fimc_is_sensor_setting_mode_change(struct fimc_is_device_sensor_peri *senso
 				dgain.long_val, dgain.middle_val, dgain.middle_val);
 
 	CALL_CISOPS(&sensor_peri->cis, cis_adjust_frame_duration, sensor_peri->subdev_cis,
-		MAX(expo.long_val, MAX(expo.short_val, expo.middle_val)), &frame_duration);
+			expo.long_val, &frame_duration);
 	fimc_is_sensor_peri_s_frame_duration(device, frame_duration);
 
 	fimc_is_sensor_peri_s_analog_gain(device, again);
@@ -1284,12 +1284,15 @@ int fimc_is_sensor_peri_pre_flash_fire(struct v4l2_subdev *subdev, void *arg)
 
 	sensor_peri = (struct fimc_is_device_sensor_peri *)module->private_data;
 
-	sensor_ctl = &sensor_peri->cis.sensor_ctls[vsync_count % CAM2P0_UCTL_LIST_SIZE];
-
 	flash = sensor_peri->flash;
 	FIMC_BUG(!flash);
 
-	if (sensor_ctl->valid_flash_udctrl == false)
+	mutex_lock(&sensor_peri->cis.control_lock);
+
+	sensor_ctl = &sensor_peri->cis.sensor_ctls[vsync_count % CAM2P0_UCTL_LIST_SIZE];
+
+	if ((sensor_ctl->valid_flash_udctrl == false)
+		|| (vsync_count != sensor_ctl->flash_frame_number))
 		goto p_err;
 
 	flash_uctl = &sensor_ctl->cur_cam20_flash_udctrl;
@@ -1314,6 +1317,7 @@ int fimc_is_sensor_peri_pre_flash_fire(struct v4l2_subdev *subdev, void *arg)
 	sensor_ctl->valid_flash_udctrl = false;
 
 p_err:
+	mutex_unlock(&sensor_peri->cis.control_lock);
 	return ret;
 }
 
@@ -1402,15 +1406,15 @@ void fimc_is_sensor_long_term_mode_set_work(struct work_struct *data)
 	sensor_peri = container_of(cis, struct fimc_is_device_sensor_peri, cis);
 	FIMC_BUG_VOID(!sensor_peri);
 
-	device = v4l2_get_subdev_hostdata(sensor_peri->subdev_flash);
-	FIMC_BUG_VOID(!device);
-
 	subdev_cis = sensor_peri->subdev_cis;
 	if (!subdev_cis) {
 		err("[%s]: no subdev_cis", __func__);
 		ret = -ENXIO;
 		return;
 	}
+
+	device = v4l2_get_subdev_hostdata(subdev_cis);
+	FIMC_BUG_VOID(!device);
 
 	info("[%s] start\n", __func__);
 	/* Sensor stream off */
@@ -1845,7 +1849,13 @@ int fimc_is_sensor_peri_s_stream(struct fimc_is_device_sensor *device,
 			sensor_peri->cis.sensor_ctls[i].force_update = false;
 			memset(&sensor_peri->cis.sensor_ctls[i].cur_cam20_flash_udctrl, 0, sizeof(camera2_flash_uctl_t));
 			sensor_peri->cis.sensor_ctls[i].valid_flash_udctrl = false;
+
+			memset(&sensor_peri->cis.sensor_ctls[i].roi_control, 0, sizeof(struct roi_setting_t));
+			memset(&sensor_peri->cis.sensor_ctls[i].stat_control, 0,
+					sizeof(struct sensor_lsi_3hdr_stat_control_per_frame));
 		}
+		sensor_peri->cis.sensor_stats = NULL;
+
 		sensor_peri->use_sensor_work = false;
 	}
 	if (ret < 0) {
@@ -1892,10 +1902,19 @@ int fimc_is_sensor_peri_s_frame_duration(struct fimc_is_device_sensor *device,
 	sensor_peri = (struct fimc_is_device_sensor_peri *)module->private_data;
 
 #ifdef FIXED_SENSOR_DEBUG
-	if (unlikely(sysfs_sensor.is_en == true)) {
+	sysfs_sensor.max_fps = sensor_peri->cis.cis_data->max_fps;
+
+	if (unlikely(sysfs_sensor.is_en == true) || unlikely(sysfs_sensor.is_fps_en == true)) {
+		if (sysfs_sensor.set_fps < sysfs_sensor.max_fps) {
+			sysfs_sensor.frame_duration = sysfs_sensor.set_fps;
+		} else if (sysfs_sensor.frame_duration > sysfs_sensor.max_fps) {
+			sysfs_sensor.frame_duration = sysfs_sensor.max_fps;
+		}
+
 		frame_duration = FPS_TO_DURATION_US(sysfs_sensor.frame_duration);
 		dbg_sensor(1, "sysfs_sensor.frame_duration = %d\n", sysfs_sensor.frame_duration);
-	}
+	} else
+		sysfs_sensor.frame_duration = FPS_TO_DURATION_US(frame_duration);
 #endif
 
 	ret = CALL_CISOPS(&sensor_peri->cis, cis_set_frame_duration, sensor_peri->subdev_cis, frame_duration);
@@ -2120,12 +2139,14 @@ int fimc_is_sensor_peri_s_sensor_stats(struct fimc_is_device_sensor *device,
 		}
 
 	} else {
-		ret = CALL_CISOPS(&sensor_peri->cis, cis_set_3hdr_stat,
+		if (data) {
+			ret = CALL_CISOPS(&sensor_peri->cis, cis_set_3hdr_stat,
 						sensor_peri->subdev_cis,
 						streaming,
 						data);
-		if (ret < 0)
-			err("failed to set 3hdr stat(%d)", ret);
+			if (ret < 0)
+				err("failed to set 3hdr stat(%d)", ret);
+		}
 	}
 p_err:
 	return ret;

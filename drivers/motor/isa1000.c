@@ -26,8 +26,9 @@
 #include <linux/delay.h>
 #include <linux/wakelock.h>
 #include <linux/regulator/consumer.h>
+#include <linux/motor/timed_output.h>
+
 #include "isa1000.h"
-#include "timed_output.h"
 
 #define MAX_INTENSITY		10000
 
@@ -87,7 +88,6 @@ static void isa1000_enable(struct timed_output_dev *dev, int value)
 	spin_unlock_irqrestore(&ddata->lock, flags);
 
 	schedule_work(&ddata->work);
-	pr_info("[VIB] %s\n", __func__);
 }
 
 static void isa1000_pwm_config(struct isa1000_ddata *ddata, int duty)
@@ -101,6 +101,7 @@ static void isa1000_pwm_config(struct isa1000_ddata *ddata, int duty)
 	else if (duty < min_duty)
 		duty = min_duty;
 
+	pr_info("[VIB] %s: period = %d, duty = %d\n", __func__, ddata->pdata->period, duty);
 	pwm_config(ddata->pwm, duty,
 		ddata->pdata->period);
 }
@@ -123,18 +124,16 @@ static void isa1000_regulator_en(struct isa1000_ddata *ddata, bool en)
 
 	if (en && !regulator_is_enabled(ddata->regulator)) {
 		ret = regulator_enable(ddata->regulator);
-		pr_info("[VIB] regulator_enable returns %d\n", ret);
+		pr_info("[VIB] regulator_enable returns: %d\n", ret);
 	}
 	else if (!en && regulator_is_enabled(ddata->regulator)) {
 		ret = regulator_disable(ddata->regulator);
-		pr_info("[VIB] regulator_disable returns %d\n", ret);
+		pr_info("[VIB] regulator_disable returns: %d\n", ret);
 	}
 }
 
 static void isa1000_en(struct isa1000_ddata *ddata, bool en)
 {
-	printk(KERN_DEBUG "[VIB] %s\n", en ? "on" : "off");
-
 	gpio_direction_output(ddata->pdata->gpio_en, en);
 
 	if (en)
@@ -147,13 +146,13 @@ static void isa1000_work_func(struct work_struct *work)
 		container_of(work, struct isa1000_ddata, work);
 	struct hrtimer *timer = &ddata->timer;
 
+	pr_info("[VIB] %s: timeout = %d\n", __func__, ddata->timeout);
 	if (ddata->timeout) {
 		ddata->running = true;
 
 		if (ddata->pdata->gpio_en > 0)
 			isa1000_en(ddata, true);
-
-		isa1000_pwm_config(ddata, ddata->duty);
+		isa1000_pwm_config(ddata, ddata->duty);	
 		isa1000_pwm_en(ddata, true);
 		isa1000_regulator_en(ddata, true);
 		hrtimer_start(timer, ns_to_ktime((u64)ddata->timeout * NSEC_PER_MSEC), HRTIMER_MODE_REL);
@@ -194,7 +193,8 @@ static ssize_t intensity_store(struct device *dev,
 		tmp *= (intensity / 100);
 		duty += (int)(tmp / 100);
 	}
-
+	
+	pr_info("[VIB] %s: duty = %d, intensity = %d\n", __func__, duty, intensity);
 	drvdata->intensity = intensity;
 	drvdata->duty = duty;
 	return count;
@@ -212,11 +212,24 @@ static ssize_t intensity_show(struct device *dev,
 
 static DEVICE_ATTR(intensity, 0660, intensity_show, intensity_store);
 
+static ssize_t motor_type_show(struct device *dev,
+			struct device_attribute *attr, char *buf)
+{
+	struct timed_output_dev *tdev = dev_get_drvdata(dev);
+	struct isa1000_ddata *drvdata
+		= container_of(tdev, struct isa1000_ddata, dev);
+
+	return snprintf(buf, VIB_BUFSIZE, "%s\n", drvdata->pdata->vib_type);
+}
+
+static DEVICE_ATTR(motor_type, S_IWUSR | S_IRUGO, motor_type_show, NULL);
+
 static struct isa1000_pdata *
 	isa1000_get_devtree_pdata(struct device *dev)
 {
 	struct device_node *node, *child_node=NULL;
 	struct isa1000_pdata *pdata;
+	const char *type;
 	int ret = 0;
 
 	node = dev->of_node;
@@ -252,12 +265,20 @@ static struct isa1000_pdata *
 	if (pdata->gpio_en > 0)
 		gpio_request(pdata->gpio_en, "isa1000,gpio_en");
 
+	ret = of_property_read_string(child_node, "isa1000,type", &type);
+	if (ret) {
+		pr_err("%s : failed to get haptic type\n", __func__);
+		goto err_out;
+	} else
+		pdata->vib_type = type;
+
 	printk("[VIB] max_timeout = %d\n", pdata->max_timeout);
 	printk("[VIB] duty = %d\n", pdata->duty);
 	printk("[VIB] period = %d\n", pdata->period);
 	printk("[VIB] pwm_id = %d\n", pdata->pwm_id);
 	printk("[VIB] gpio_en = %d\n", pdata->gpio_en);
 	printk("[VIB] pwm_use = %d\n", pdata->pwm_use);
+	printk("[VIB] type = %s\n", pdata->vib_type);
 
 	return pdata;
 
@@ -330,6 +351,12 @@ static int isa1000_probe(struct platform_device *pdev)
 			goto err_dev_reg;
 		}
 	}
+	
+	ret = sysfs_create_file(&ddata->dev.dev->kobj, &dev_attr_motor_type.attr);
+	if (ret < 0){
+		pr_err("Failed to register sysfs : %d\n", ret);
+		goto err_dev_reg;
+	}
 
 	platform_set_drvdata(pdev, ddata);
 
@@ -370,6 +397,9 @@ static int isa1000_suspend(struct platform_device *pdev,
 
 static int isa1000_resume(struct platform_device *pdev)
 {
+	struct isa1000_ddata *ddata = platform_get_drvdata(pdev);
+
+	pwm_config(ddata->pwm, ddata->pdata->period, ddata->pdata->period);
 	return 0;
 }
 

@@ -956,6 +956,16 @@ static void wq_func_subdev(struct fimc_is_subdev *leader,
 
 	clear_bit(subdev->id, &ldr_frame->out_flag);
 
+	/* For supporting multi input to single output */
+	if (subdev->vctx->video->try_smp) {
+		subdev->vctx->video->try_smp = false;
+		up(&subdev->vctx->video->smp_multi_input);
+	}
+
+	/* Skip done when current frame is doing stripe_process. */
+	if (!status && sub_frame->state == FS_STRIPE_PROCESS)
+		return;
+
 complete:
 	sub_frame->stream->fcount = fcount;
 	sub_frame->stream->rcount = rcount;
@@ -994,7 +1004,10 @@ static void wq_func_frame(struct fimc_is_subdev *leader,
 
 	framemgr_e_barrier_irqs(framemgr, FMGR_IDX_4, flags);
 
-	frame = peek_frame(framemgr, FS_PROCESS);
+	frame = find_stripe_process_frame(framemgr, fcount);
+	if (!frame)
+		frame = peek_frame(framemgr, FS_PROCESS);
+
 	if (frame) {
 		if (!frame->stream) {
 			mserr("stream is NULL", subdev, subdev);
@@ -1853,12 +1866,6 @@ static void wq_func_m0p(struct work_struct *data)
 			goto p_err;
 		}
 
-		/* For supporting multi input to single output */
-		if (subdev->vctx->video->try_smp) {
-			subdev->vctx->video->try_smp = false;
-			up(&subdev->vctx->video->smp_multi_input);
-		}
-
 		wq_func_frame(leader, subdev, fcount, rcount, status);
 
 p_err:
@@ -1907,12 +1914,6 @@ static void wq_func_m1p(struct work_struct *data)
 		if (!leader) {
 			merr("leader is NULL", device);
 			goto p_err;
-		}
-
-		/* For supporting multi input to single output */
-		if (subdev->vctx->video->try_smp) {
-			subdev->vctx->video->try_smp = false;
-			up(&subdev->vctx->video->smp_multi_input);
 		}
 
 		wq_func_frame(leader, subdev, fcount, rcount, status);
@@ -1965,12 +1966,6 @@ static void wq_func_m2p(struct work_struct *data)
 			goto p_err;
 		}
 
-		/* For supporting multi input to single output */
-		if (subdev->vctx->video->try_smp) {
-			subdev->vctx->video->try_smp = false;
-			up(&subdev->vctx->video->smp_multi_input);
-		}
-
 		wq_func_frame(leader, subdev, fcount, rcount, status);
 
 p_err:
@@ -2019,12 +2014,6 @@ static void wq_func_m3p(struct work_struct *data)
 		if (!leader) {
 			merr("leader is NULL", device);
 			goto p_err;
-		}
-
-		/* For supporting multi input to single output */
-		if (subdev->vctx->video->try_smp) {
-			subdev->vctx->video->try_smp = false;
-			up(&subdev->vctx->video->smp_multi_input);
 		}
 
 		wq_func_frame(leader, subdev, fcount, rcount, status);
@@ -2077,12 +2066,6 @@ static void wq_func_m4p(struct work_struct *data)
 			goto p_err;
 		}
 
-		/* For supporting multi input to single output */
-		if (subdev->vctx->video->try_smp) {
-			subdev->vctx->video->try_smp = false;
-			up(&subdev->vctx->video->smp_multi_input);
-		}
-
 		wq_func_frame(leader, subdev, fcount, rcount, status);
 
 p_err:
@@ -2131,12 +2114,6 @@ static void wq_func_m5p(struct work_struct *data)
 		if (!leader) {
 			merr("leader is NULL", device);
 			goto p_err;
-		}
-
-		/* For supporting multi input to single output */
-		if (subdev->vctx->video->try_smp) {
-			subdev->vctx->video->try_smp = false;
-			up(&subdev->vctx->video->smp_multi_input);
 		}
 
 		wq_func_frame(leader, subdev, fcount, rcount, status);
@@ -2195,6 +2172,19 @@ static void wq_func_group_xxx(struct fimc_is_groupmgr *groupmgr,
 	frame->result = status;
 	clear_bit(group->leader.id, &frame->out_flag);
 	fimc_is_group_done(groupmgr, group, frame, done_state);
+
+	/**
+	 * Skip done when current frame is doing stripe process,
+	 * and re-trigger the group shot for next stripe process.
+	 */
+	if (!status && frame->state == FS_STRIPE_PROCESS) {
+		frame->stripe_info.region_id++;
+		return;
+	}
+
+	frame->stripe_info.region_id = 0;
+	frame->stripe_info.region_num  = 0;
+
 	trans_frame(framemgr, frame, FS_COMPLETE);
 	CALL_VOPS(vctx, done, frame->index, done_state);
 }
@@ -2348,7 +2338,9 @@ static void wq_func_shot(struct work_struct *data)
 
 		framemgr_e_barrier_irqs(framemgr, FMGR_IDX_5, flags);
 
-		frame = peek_frame(framemgr, FS_PROCESS);
+		frame = find_stripe_process_frame(framemgr, fcount);
+		if (!frame)
+			frame = peek_frame(framemgr, FS_PROCESS);
 
 		if (frame) {
 			/* clear bit for child group */

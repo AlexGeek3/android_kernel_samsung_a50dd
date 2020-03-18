@@ -261,11 +261,11 @@ static void csis_s_vc_dma_multibuf(struct fimc_is_device_csi *csi)
 	}
 }
 
-static void csis_disable_all_vc_dma_buf(struct fimc_is_device_csi *csi)
+static void csis_check_vc_dma_buf(struct fimc_is_device_csi *csi)
 {
 	u32 vc;
-	int cur_dma_enable;
 	struct fimc_is_framemgr *framemgr;
+	struct fimc_is_frame *frame;
 	struct fimc_is_subdev *dma_subdev;
 	unsigned long flags;
 
@@ -279,36 +279,46 @@ static void csis_disable_all_vc_dma_buf(struct fimc_is_device_csi *csi)
 			test_bit(FIMC_IS_SUBDEV_INTERNAL_USE, &dma_subdev->state))
 			continue;
 
-		/* default dma disable */
-		csi_s_output_dma(csi, vc, false);
-
-		/* print infomation DMA on/off */
-		cur_dma_enable = csi_hw_g_output_cur_dma_enable(csi->vc_reg[csi->scm][vc], vc);
-
 		framemgr = GET_SUBDEV_FRAMEMGR(dma_subdev);
 		framemgr_e_barrier_irqs(framemgr, 0, flags);
 		if (likely(framemgr)) {
+			/* process to NDONE if set to bad frame */
+			if (framemgr->queued_count[FS_PROCESS]) {
+				frame = peek_frame(framemgr, FS_PROCESS);
+
+				if (frame->result) {
+					mserr("[F%d] NDONE(%d, E%X)\n", dma_subdev, dma_subdev,
+						frame->fcount, frame->index, frame->result);
+					trans_frame(framemgr, frame, FS_COMPLETE);
+					CALL_VOPS(dma_subdev->vctx, done, frame->index, VB2_BUF_STATE_ERROR);
+				}
+			}
+
 			/*
 			 * W/A: DMA should be on forcely at invalid frame state.
 			 * The invalid state indicates that there is process frame at DMA off.
 			 */
 			if (framemgr->queued_count[FS_PROCESS] &&
-				!csi->pre_dma_enable[vc] && !cur_dma_enable) {
+				!csi->pre_dma_enable[vc] && !csi->cur_dma_enable[vc]) {
 				csi_s_output_dma(csi, vc, true);
 				minfo("[VC%d] DMA on forcely[P(%d)]\n", csi, vc, framemgr->queued_count[FS_PROCESS]);
 				print_frame_queue(framemgr, FS_PROCESS);
 			}
 
+			/* print infomation DMA on/off */
 			if (test_bit(CSIS_START_STREAM, &csi->state) &&
-				csi->pre_dma_enable[vc] != cur_dma_enable) {
+				csi->pre_dma_enable[vc] != csi->cur_dma_enable[vc]) {
 				minfo("[VC%d][F%d] DMA %s [%d/%d/%d]\n", csi, vc, atomic_read(&csi->fcount),
-						(cur_dma_enable ? "on" : "off"),
+						(csi->cur_dma_enable[vc] ? "on" : "off"),
 						framemgr->queued_count[FS_REQUEST],
 						framemgr->queued_count[FS_PROCESS],
 						framemgr->queued_count[FS_COMPLETE]);
 
-				csi->pre_dma_enable[vc] = cur_dma_enable;
+				csi->pre_dma_enable[vc] = csi->cur_dma_enable[vc];
 			}
+
+			/* after update pre_dma_disable, clear dma enable state */
+			csi->cur_dma_enable[vc] = 0;
 		} else {
 			merr("[VC%d] framemgr is NULL", csi, vc);
 		}
@@ -521,8 +531,8 @@ void tasklet_csis_str_otf(unsigned long data)
 	}
 
 trigger_skip:
-	/* disable all virtual channel's dma */
-	csis_disable_all_vc_dma_buf(csi);
+	/* check all virtual channel's dma */
+	csis_check_vc_dma_buf(csi);
 	/* re-set internal vc dma if flushed */
 	csis_s_vc_dma_multibuf(csi);
 
@@ -551,8 +561,8 @@ void tasklet_csis_str_m2m(unsigned long data)
 #ifdef TASKLET_MSG
 	pr_info("S%d\n", fcount);
 #endif
-	/* disable all virtual channel's dma */
-	csis_disable_all_vc_dma_buf(csi);
+	/* check all virtual channel's dma */
+	csis_check_vc_dma_buf(csi);
 	/* re-set internal vc dma if flushed */
 	csis_s_vc_dma_multibuf(csi);
 
@@ -1056,6 +1066,12 @@ static irqreturn_t fimc_is_isr_csi(int irq, void *data)
 		if (csi->sw_checker != EXPECT_FRAME_START) {
 			warn("[CSIS%d] Lost end interrupt\n",
 					csi->instance);
+			/*
+			 * Even though it skips to start tasklet,
+			 * framecount of CSI device should be increased
+			 * to match with chain device including DDK.
+			 */
+			atomic_inc(&csi->fcount);
 			goto clear_status;
 		}
 		csi_frame_start_inline(csi);
@@ -1065,6 +1081,12 @@ static irqreturn_t fimc_is_isr_csi(int irq, void *data)
 		if (csi->sw_checker != EXPECT_FRAME_END) {
 			warn("[CSIS%d] Lost start interrupt\n",
 					csi->instance);
+			/*
+			 * Even though it skips to start tasklet,
+			 * framecount of CSI device should be increased
+			 * to match with chain device including DDK.
+			 */
+			atomic_inc(&csi->fcount);
 
 			/*
 			 * If LOST_FS_VC_ERR is happened, there is only end interrupt
@@ -1103,6 +1125,7 @@ static inline void csi_wq_func_schedule(struct fimc_is_device_csi *csi,
 static irqreturn_t fimc_is_isr_csi_dma(int irq, void *data)
 {
 	struct fimc_is_device_csi *csi;
+	int dma_frame_str = 0;
 	int dma_frame_end = 0;
 	int dma_err_flag = 0;
 	u32 dma_err_id[CSI_VIRTUAL_CH_MAX];
@@ -1133,18 +1156,27 @@ static irqreturn_t fimc_is_isr_csi_dma(int irq, void *data)
 		dma_err_id[vc] = irq_src.err_id[vc_phys];
 		dma_err_flag |= dma_err_id[vc];
 
+		if (irq_src.dma_start)
+			dma_frame_str |= 1 << vc;
+
 		if (irq_src.dma_end)
 			dma_frame_end |= 1 << vc;
 	}
 
-	dbg_isr("DE %d %X\n", csi, csi->instance, dma_frame_end);
-
 	/* DMA End */
 	if (dma_frame_end) {
+		dbg_isr("DE %d %X\n", csi, csi->instance, dma_frame_end);
 #if !defined(SUPPORTED_EARLYBUF_DONE_HW)
 		/* VC0 */
-		if (csi->dma_subdev[CSI_VIRTUAL_CH_0] && (dma_frame_end & (1 << CSI_VIRTUAL_CH_0)))
-			csi_wq_func_schedule(csi, &csi->wq_csis_dma[CSI_VIRTUAL_CH_0]);
+		if (csi->dma_subdev[CSI_VIRTUAL_CH_0] && (dma_frame_end & (1 << CSI_VIRTUAL_CH_0))) {
+			if (IS_ENABLED(CHAIN_USE_VC_TASKLET)) {
+				csi_wq_func_schedule(csi, &csi->wq_csis_dma[CSI_VIRTUAL_CH_0]);
+			} else {
+				framemgr = csis_get_vc_framemgr(csi, CSI_VIRTUAL_CH_0);
+				if (framemgr)
+					csi_dma_tag(*csi->subdev, csi, framemgr, CSI_VIRTUAL_CH_0);
+			}
+		}
 #endif
 		for (vc = CSI_VIRTUAL_CH_1; vc < CSI_VIRTUAL_CH_MAX; vc++) {
 			if ((dma_frame_end & (1 << vc)) && csi->dma_subdev[vc]) {
@@ -1163,6 +1195,19 @@ static irqreturn_t fimc_is_isr_csi_dma(int irq, void *data)
 					csi_wq_func_schedule(csi, &csi->wq_csis_dma[vc]);
 				}
 			}
+		}
+	}
+
+	if (dma_frame_str) {
+		dbg_isr("DS %d %X\n", csi, csi->instance, dma_frame_str);
+		for (vc = CSI_VIRTUAL_CH_0; vc < CSI_VIRTUAL_CH_MAX; vc++) {
+			if (!csi->dma_subdev[vc] ||
+				!test_bit(FIMC_IS_SUBDEV_OPEN, &csi->dma_subdev[vc]->state) ||
+				test_bit(FIMC_IS_SUBDEV_INTERNAL_USE, &csi->dma_subdev[vc]->state))
+				continue;
+
+			/* dma disable if interrupt occured */
+			csi_s_output_dma(csi, vc, false);
 		}
 	}
 
@@ -1547,6 +1592,7 @@ static int csi_stream_on(struct v4l2_subdev *subdev,
 		csi->overflow_cnt = 0;
 		csi_s_config_dma(csi, sensor_cfg->output);
 		memset(csi->pre_dma_enable, -1, sizeof(csi->pre_dma_enable));
+		memset(csi->cur_dma_enable, -1, sizeof(csi->cur_dma_enable));
 
 		/* for multi frame buffer setting for internal vc */
 		csis_s_vc_dma_multibuf(csi);
@@ -1892,9 +1938,13 @@ static int csi_s_buffer(struct v4l2_subdev *subdev, void *buf, unsigned int *siz
 	if (csi_hw_g_output_dma_enable(csi->vc_reg[csi->scm][vc], vc)) {
 		err("[VC%d][F%d] already DMA enabled!!", vc, frame->fcount);
 		ret = -EINVAL;
+
+		frame->result = IS_SHOT_BAD_FRAME;
+		trans_frame(framemgr, frame, FS_PROCESS);
 	} else {
 		csi_s_buf_addr(csi, frame, 0, vc);
 		csi_s_output_dma(csi, vc, true);
+		csi->cur_dma_enable[vc] = 1;
 
 		trans_frame(framemgr, frame, FS_PROCESS);
 	}

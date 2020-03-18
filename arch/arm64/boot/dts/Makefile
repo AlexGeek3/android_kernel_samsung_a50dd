@@ -1,11 +1,14 @@
 # SPDX-License-Identifier: GPL-2.0
-dts-dirs += exynos
-
-subdir-y          := $(dts-dirs)
-
-always            := $(DTB_LIST)
+dtb-y += exynos/exynos9610.dtb
+dtbo-y += samsung/exynos9610-a50_kor_single_03.dtbo
+dtbo-y += samsung/exynos9610-a50_kor_single_04.dtbo
+dtbo-y += samsung/exynos9610-a50_kor_single_06.dtbo
+dtbo-y += samsung/exynos9610-a50_kor_single_09.dtbo
 
 targets += dtbs
+DTB_LIST  := $(dtb-y) $(dtbo-y)
+always    := $(DTB_LIST)
+
 dtbs: $(addprefix $(obj)/, $(DTB_LIST))
 
-clean-files       := exynos/*.dtb *.dtb*
+clean-files := *.dtb*

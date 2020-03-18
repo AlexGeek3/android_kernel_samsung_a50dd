@@ -39,7 +39,12 @@ void pcie_mbox_init(
 	__iomem void            *pcie_registers,
 	struct functor          *ap_interrupt_trigger,
 	struct functor          *r4_interrupt_trigger,
+#ifdef CONFIG_SCSC_MX450_GDB_SUPPORT
+	struct functor          *m4_interrupt_trigger,
+	struct functor          *m4_1_interrupt_trigger
+#else
 	struct functor          *m4_interrupt_trigger
+#endif
 	)
 {
 	mbox->shared_data = (struct pcie_mbox_shared_data *)shared_data_region;
@@ -51,6 +56,9 @@ void pcie_mbox_init(
 	pcie_mbox_intgen_init(&mbox->ap_intgen, "AP", &mbox->shared_data->ap_interrupt, ap_interrupt_trigger);
 	pcie_mbox_intgen_init(&mbox->r4_intgen, "R4", &mbox->shared_data->r4_interrupt, r4_interrupt_trigger);
 	pcie_mbox_intgen_init(&mbox->m4_intgen, "M4", &mbox->shared_data->m4_interrupt, m4_interrupt_trigger);
+#ifdef CONFIG_SCSC_MX450_GDB_SUPPORT
+	pcie_mbox_intgen_init(&mbox->m4_intgen_1, "M4", &mbox->shared_data->m4_1_interrupt, m4_1_interrupt_trigger);
+#endif
 }
 
 u32 pcie_mbox_get_ap_interrupt_masked_bitmask(const struct pcie_mbox *mbox)
@@ -98,6 +106,11 @@ void pcie_mbox_set_outgoing_interrupt_source(struct pcie_mbox *mbox, enum scsc_m
 	case SCSC_MIF_ABS_TARGET_M4:
 		pcie_mbox_intgen_set_source(&mbox->m4_intgen, source_num);
 		break;
+#ifdef CONFIG_SCSC_MX450_GDB_SUPPORT
+	case SCSC_MIF_ABS_TARGET_M4_1:
+		pcie_mbox_intgen_set_source(&mbox->m4_intgen, source_num);
+		break;
+#endif
 	default:
 		SCSC_TAG_ERR(PCIE_MIF, "Invalid interrupt target %d\n", target_node);
 		return;

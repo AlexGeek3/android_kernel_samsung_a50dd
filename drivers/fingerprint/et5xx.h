@@ -249,7 +249,10 @@ struct etspi_data {
 	int detect_threshold;
 	bool finger_on;
 	const char *chipid;
+	bool ldo_enabled;
 	unsigned int orient;
+	int reset_count;
+	int interrupt_count;
 };
 
 int etspi_io_burst_read_register(struct etspi_data *etspi,

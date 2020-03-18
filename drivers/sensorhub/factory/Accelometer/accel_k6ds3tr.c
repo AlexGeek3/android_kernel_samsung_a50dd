@@ -40,48 +40,14 @@ ssize_t get_accel_k6ds3tr_vendor(char *buf)
 	return sprintf(buf, "%s\n", "STM");
 }
 
-int enable_accel_k6ds3tr_for_cal(struct ssp_data *data)
-{
-	u8 buf[8] = { 0, };
-	s32 dMsDelay = data->delay[SENSOR_TYPE_ACCELEROMETER].sampling_period;
-	memcpy(&buf[0], &dMsDelay, 4);
-
-	if (atomic64_read(&data->sensor_en_state) & (1ULL << SENSOR_TYPE_ACCELEROMETER)) {
-		if (get_msdelay(data->delay[SENSOR_TYPE_ACCELEROMETER]) != 10) {
-			make_command(data, CHANGE_DELAY,
-			             SENSOR_TYPE_ACCELEROMETER, buf, 8);
-			return SUCCESS;
-		}
-	} else {
-		make_command(data, ADD_SENSOR,
-		             SENSOR_TYPE_ACCELEROMETER, buf, 8);
-	}
-
-	return FAIL;
-}
-
-void disable_accel_k6ds3tr_for_cal(struct ssp_data *data, int ret)
-{
-	u8 buf[8] = { 0, };
-	s32 dMsDelay = data->delay[SENSOR_TYPE_ACCELEROMETER].sampling_period;
-	memcpy(&buf[0], &dMsDelay, 4);
-
-	if (atomic64_read(&data->sensor_en_state) & (1ULL << SENSOR_TYPE_ACCELEROMETER)) {
-		if (ret >= 0)
-			make_command(data, CHANGE_DELAY,
-			             SENSOR_TYPE_ACCELEROMETER, buf, 8);
-	} else {
-		make_command(data, REMOVE_SENSOR,
-		             SENSOR_TYPE_ACCELEROMETER, buf, 4);
-	}
-}
-
 int accel_k6ds3tr_do_calibrate(struct ssp_data *data, int enable)
 {
 	int iSum[3] = { 0, };
 	int ret = 0;
 	struct file *cal_filp = NULL;
 	mm_segment_t old_fs;
+	struct sensor_delay backup_delay = data->delay[SENSOR_TYPE_ACCELEROMETER];
+	bool change_delay = false;
 
 	if (enable) {
 		int count;
@@ -90,7 +56,15 @@ int accel_k6ds3tr_do_calibrate(struct ssp_data *data, int enable)
 		data->accelcal.z = 0;
 		set_accel_cal(data);
 
-		ret = enable_k6ds3tr_accel_for_cal(data);
+		set_delay_legacy_sensor(data, SENSOR_TYPE_ACCELEROMETER, 10, 0);
+		if(atomic64_read(&data->sensor_en_state) & (1ULL << SENSOR_TYPE_ACCELEROMETER)) {
+			if (data->delay[SENSOR_TYPE_ACCELEROMETER].sampling_period != 10 
+				|| data->delay[SENSOR_TYPE_ACCELEROMETER].max_report_latency != 0)
+				change_delay = true;
+		} else {
+			enable_legacy_sensor(data, SENSOR_TYPE_ACCELEROMETER);
+		}
+		
 		msleep(300);
 
 		for (count = 0; count < CALIBRATION_DATA_AMOUNT; count++) {
@@ -99,7 +73,13 @@ int accel_k6ds3tr_do_calibrate(struct ssp_data *data, int enable)
 			iSum[2] += data->buf[SENSOR_TYPE_ACCELEROMETER].z;
 			mdelay(10);
 		}
-		disable_accel_k6ds3tr_for_cal(data, ret);
+
+		if (atomic64_read(&data->sensor_en_state) & (1ULL << SENSOR_TYPE_ACCELEROMETER)) {
+			if (change_delay)
+				set_delay_legacy_sensor(data, SENSOR_TYPE_ACCELEROMETER, backup_delay.sampling_period, backup_delay.max_report_latency);
+		} else {
+			disable_legacy_sensor(data, SENSOR_TYPE_ACCELEROMETER);
+		}
 
 		data->accelcal.x = (iSum[0] / CALIBRATION_DATA_AMOUNT);
 		data->accelcal.y = (iSum[1] / CALIBRATION_DATA_AMOUNT);

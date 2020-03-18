@@ -11,8 +11,10 @@
 #define NORMAL_TEMPERATURE	25	/* 25 degrees Celsius */
 
 #define ACL_CMD_CNT				((u16)ARRAY_SIZE(SEQ_ACL_OFF))
+#define ACL_DIM_CMD_CNT				((u16)ARRAY_SIZE(SEQ_ACL_DIM_OFF))
 #define HBM_CMD_CNT				((u16)ARRAY_SIZE(SEQ_HBM_OFF))
 #define ELVSS_CMD_CNT				((u16)ARRAY_SIZE(SEQ_ELVSS_SET))
+#define ACL_DIM_FRAME_OFFSET			3
 
 #define LDI_REG_BRIGHTNESS			0x51
 #define LDI_REG_ID				0x04
@@ -46,35 +48,56 @@
 #define LDI_GPARA_ELVSS_NORMAL			7	/* B7h 8th Para */
 #define LDI_GPARA_ELVSS_HBM			8	/* B7h 9th Para */
 
-#define	LDI_REG_RDDPM		0x0A	/* Read Display Power Mode */
-#define	LDI_LEN_RDDPM		1
+struct bit_info {
+	unsigned int reg;
+	unsigned int len;
+	char **print;
+	unsigned int expect;
+	unsigned int offset;
+	unsigned int g_para;
+	unsigned int invert;
+	unsigned int mask;
+	unsigned int result;
+};
 
-#define	LDI_REG_RDDSM		0x0E	/* Read Display Signal Mode */
-#define	LDI_LEN_RDDSM		1
+enum {
+	LDI_BIT_ENUM_05,	LDI_BIT_ENUM_RDNUMED = LDI_BIT_ENUM_05,
+	LDI_BIT_ENUM_0A,	LDI_BIT_ENUM_RDDPM = LDI_BIT_ENUM_0A,
+	LDI_BIT_ENUM_0E,	LDI_BIT_ENUM_RDDSM = LDI_BIT_ENUM_0E,
+	LDI_BIT_ENUM_0F,	LDI_BIT_ENUM_RDDSDR = LDI_BIT_ENUM_0F,
+	LDI_BIT_ENUM_MAX
+};
 
-#ifdef CONFIG_DISPLAY_USE_INFO
-#define	LDI_REG_RDNUMPE		0x05		/* DPUI_KEY_PNDSIE: Read Number of the Errors on DSI */
-#define	LDI_LEN_RDNUMPE		1
-#define LDI_PNDSIE_MASK		(GENMASK(6, 0))
+static char *LDI_BIT_DESC_05[BITS_PER_BYTE] = {
+	[0 ... 6] = "number of corrupted packets",
+	[7] = "overflow on number of corrupted packets",
+};
 
-/*
- * ESD_ERROR[0] =  MIPI DSI error is occurred by ESD.
- * ESD_ERROR[1] =  HS CLK lane error is occurred by ESD.
- * ESD_ERROR[2] =  VLIN3 error is occurred by ESD.
- * ESD_ERROR[3] =  ELVDD error is occurred by ESD.
- * ESD_ERROR[4]  = CHECK_SUM error is occurred by ESD.
- * ESD_ERROR[5] =  Internal HSYNC error is occurred by ESD.
- * ESD_ERROR[6] =  VLIN1 error is occurred by ESD
- */
-#define LDI_REG_ESDERR		0xEE		/* DPUI_KEY_PNELVDE, DPUI_KEY_PNVLI1E, DPUI_KEY_PNVLO3E, DPUI_KEY_PNESDE */
-#define LDI_LEN_ESDERR		1
-#define LDI_PNELVDE_MASK	(BIT(3))	/* ELVDD error */
-#define LDI_PNVLI1E_MASK	(BIT(6))	/* VLIN1 error */
-#define LDI_PNVLO3E_MASK	(BIT(2))	/* VLIN3 error */
-#define LDI_PNESDE_MASK		(BIT(2) | BIT(3) | BIT(6))
+static char *LDI_BIT_DESC_0A[BITS_PER_BYTE] = {
+	[2] = "Display is Off",
+	[7] = "Booster has a fault",
+};
 
-#define LDI_REG_RDDSDR		0x0F		/* DPUI_KEY_PNSDRE: Read Display Self-Diagnostic Result */
-#define LDI_LEN_RDDSDR		1
+static char *LDI_BIT_DESC_0E[BITS_PER_BYTE] = {
+	[0] = "Error on DSI",
+};
+
+static char *LDI_BIT_DESC_0F[BITS_PER_BYTE] = {
+	[7] = "Register Loading Detection",
+};
+
+static struct bit_info ldi_bit_info_list[LDI_BIT_ENUM_MAX] = {
+	[LDI_BIT_ENUM_05] = {0x05, 1, LDI_BIT_DESC_05, 0x00, },
+	[LDI_BIT_ENUM_0A] = {0x0A, 1, LDI_BIT_DESC_0A, 0x9C, .invert = (BIT(2) | BIT(7)), },
+	[LDI_BIT_ENUM_0E] = {0x0E, 1, LDI_BIT_DESC_0E, 0x80, },
+	[LDI_BIT_ENUM_0F] = {0x0F, 1, LDI_BIT_DESC_0F, 0xC0, .invert = (BIT(7)), },
+};
+
+#if defined(CONFIG_DISPLAY_USE_INFO)
+#define LDI_LEN_RDNUMED		1		/* DPUI_KEY_PNDSIE: Read Number of the Errors on DSI */
+#define LDI_PNDSIE_MASK		(GENMASK(7, 0))
+
+#define LDI_LEN_RDDSDR		1		/* DPUI_KEY_PNSDRE: Read Display Self-Diagnostic Result */
 #define LDI_PNSDRE_MASK		(BIT(7))	/* D7: REG_DET: Register Loading Detection */
 #endif
 
@@ -147,12 +170,6 @@ static unsigned char SEQ_VSYNC_SET[] = {
 	0x01		/* Vsync Enable */
 };
 
-static unsigned char SEQ_ASWIRE_OFF[] = {
-	0xD5,
-	0x83, 0xFF, 0x5C, 0x44, 0x89, 0x89, 0x00, 0x00, 0x00, 0x00,
-	0x00
-};
-
 static unsigned char SEQ_ELVSS_SET[] = {
 	0xB7,
 	0x01, 0x53, 0x28, 0x4D, 0x00,
@@ -170,7 +187,7 @@ static unsigned char SEQ_ELVSS_SET[] = {
 
 static unsigned char SEQ_HBM_ON[] = {
 	0x53,
-	0xE0,
+	0xE8,
 };
 
 static unsigned char SEQ_HBM_OFF[] = {
@@ -178,9 +195,29 @@ static unsigned char SEQ_HBM_OFF[] = {
 	0x28,
 };
 
+static unsigned char SEQ_HBM_ON_DIMMING_OFF[] = {
+	0x53,
+	0xE0,
+};
+
 static unsigned char SEQ_HBM_OFF_DIMMING_OFF[] = {
 	0x53,
 	0x20,
+};
+
+static unsigned char SEQ_ACL_DIM_OFFSET[] = {
+	0xB0,
+	0xDB,
+};
+
+static unsigned char SEQ_ACL_DIM_OFF[] = {
+	0xB9,
+	0x41, 0xFE, 0x00	/* 0 frame */
+};
+
+static unsigned char SEQ_ACL_DIM_ON[] = {
+	0xB9,
+	0x41, 0xFE, 0x20	/* 32 frame */
 };
 
 static unsigned char SEQ_ACL_SETTING_1[] = {
@@ -218,27 +255,61 @@ enum {
 	ALPM_MODE_MAX
 };
 
-static unsigned char SEQ_HLPM_ON_02[] = {
-	0x53,
-	0x23		/* 0x23 : HLPM 2nit On */
+enum {
+	AOD_MODE_OFF,
+	AOD_MODE_ALPM,
+	AOD_MODE_HLPM,
+	AOD_MODE_MAX
 };
 
-static unsigned char SEQ_HLPM_ON_60[] = {
-	0x53,
-	0x22		/* 0x22 : HLPM 60nit On */
+enum {
+	AOD_HLPM_OFF,
+	AOD_HLPM_02_NIT,
+	AOD_HLPM_10_NIT,
+	AOD_HLPM_30_NIT,
+	AOD_HLPM_60_NIT,
+	AOD_HLPM_STATE_MAX
 };
 
-static unsigned char SEQ_HLPM_OFF[] = {
-	0x53,
-	0x20
+static const char *AOD_HLPM_STATE_NAME[AOD_HLPM_STATE_MAX] = {
+	"HLPM_OFF",
+	"HLPM_02_NIT",
+	"HLPM_10_NIT",
+	"HLPM_30_NIT",
+	"HLPM_60_NIT",
 };
 
-static unsigned char SEQ_VLOUT3_SET[] = {
+static unsigned int lpm_old_table[ALPM_MODE_MAX] = {
+	AOD_HLPM_OFF,
+	AOD_HLPM_02_NIT,
+	AOD_HLPM_02_NIT,
+	AOD_HLPM_60_NIT,
+	AOD_HLPM_60_NIT,
+};
+
+static unsigned int lpm_brightness_table[EXTEND_BRIGHTNESS + 1] = {
+	[0 ... 39]			= AOD_HLPM_02_NIT,
+	[40 ... 70]			= AOD_HLPM_10_NIT,
+	[71 ... 93]			= AOD_HLPM_30_NIT,
+	[94 ... EXTEND_BRIGHTNESS]	= AOD_HLPM_60_NIT,
+};
+
+static unsigned char SEQ_HLPM_VLOUT3_SET[] = {
 	0xD4,
 	0x8B
 };
 
-static unsigned char SEQ_GPARA_68[] = {
+static unsigned char SEQ_HLPM_GPARA_A3[] = {
+	0xB0,
+	0xA3
+};
+
+static unsigned char SEQ_HLPM_SELECT[] = {
+	0xC7,
+	0x00
+};
+
+static unsigned char SEQ_HLPM_GPARA_68[] = {
 	0xB0,
 	0x68
 };
@@ -247,9 +318,81 @@ static unsigned char SEQ_HLPM_AOR_60[] = {
 	0xB9,
 	0x01, 0x48
 };
+
+static unsigned char SEQ_HLPM_AOR_30[] = {
+	0xB9,
+	0x52, 0x38
+};
+
+static unsigned char SEQ_HLPM_AOR_10[] = {
+	0xB9,
+	0x7F, 0x08
+};
+
+static unsigned char SEQ_HLPM_ON_H[] = {
+	0x53,
+	0x22
+};
+
+static unsigned char SEQ_HLPM_ON_L[] = {
+	0x53,
+	0x23
+};
+
+static unsigned char SEQ_HLPM_OFF[] = {
+	0x53,
+	0x20
+};
+
+static struct lcd_seq_info LCD_SEQ_HLPM_60_NIT[] = {
+	{SEQ_TEST_KEY_ON_F0, ARRAY_SIZE(SEQ_TEST_KEY_ON_F0) },
+	{SEQ_HLPM_VLOUT3_SET, ARRAY_SIZE(SEQ_HLPM_VLOUT3_SET) },
+	{SEQ_HLPM_GPARA_A3, ARRAY_SIZE(SEQ_HLPM_GPARA_A3) },
+	{SEQ_HLPM_SELECT, ARRAY_SIZE(SEQ_HLPM_SELECT) },
+	{SEQ_HLPM_GPARA_68, ARRAY_SIZE(SEQ_HLPM_GPARA_68) },
+	{SEQ_HLPM_AOR_60, ARRAY_SIZE(SEQ_HLPM_AOR_60) },
+	{SEQ_HLPM_ON_H, ARRAY_SIZE(SEQ_HLPM_ON_H), 1},
+	{SEQ_TEST_KEY_OFF_F0, ARRAY_SIZE(SEQ_TEST_KEY_OFF_F0) },
+};
+
+static struct lcd_seq_info LCD_SEQ_HLPM_30_NIT[] = {
+	{SEQ_TEST_KEY_ON_F0, ARRAY_SIZE(SEQ_TEST_KEY_ON_F0) },
+	{SEQ_HLPM_VLOUT3_SET, ARRAY_SIZE(SEQ_HLPM_VLOUT3_SET) },
+	{SEQ_HLPM_GPARA_A3, ARRAY_SIZE(SEQ_HLPM_GPARA_A3) },
+	{SEQ_HLPM_SELECT, ARRAY_SIZE(SEQ_HLPM_SELECT) },
+	{SEQ_HLPM_GPARA_68, ARRAY_SIZE(SEQ_HLPM_GPARA_68) },
+	{SEQ_HLPM_AOR_30, ARRAY_SIZE(SEQ_HLPM_AOR_30) },
+	{SEQ_HLPM_ON_H, ARRAY_SIZE(SEQ_HLPM_ON_H), 1},
+	{SEQ_TEST_KEY_OFF_F0, ARRAY_SIZE(SEQ_TEST_KEY_OFF_F0) },
+};
+
+static struct lcd_seq_info LCD_SEQ_HLPM_10_NIT[] = {
+	{SEQ_TEST_KEY_ON_F0, ARRAY_SIZE(SEQ_TEST_KEY_ON_F0) },
+	{SEQ_HLPM_VLOUT3_SET, ARRAY_SIZE(SEQ_HLPM_VLOUT3_SET) },
+	{SEQ_HLPM_GPARA_A3, ARRAY_SIZE(SEQ_HLPM_GPARA_A3) },
+	{SEQ_HLPM_SELECT, ARRAY_SIZE(SEQ_HLPM_SELECT) },
+	{SEQ_HLPM_GPARA_68, ARRAY_SIZE(SEQ_HLPM_GPARA_68) },
+	{SEQ_HLPM_AOR_10, ARRAY_SIZE(SEQ_HLPM_AOR_10) },
+	{SEQ_HLPM_ON_H, ARRAY_SIZE(SEQ_HLPM_ON_H), 1},
+	{SEQ_TEST_KEY_OFF_F0, ARRAY_SIZE(SEQ_TEST_KEY_OFF_F0) },
+};
+
+static struct lcd_seq_info LCD_SEQ_HLPM_02_NIT[] = {
+	{SEQ_TEST_KEY_ON_F0, ARRAY_SIZE(SEQ_TEST_KEY_ON_F0) },
+	{SEQ_HLPM_VLOUT3_SET, ARRAY_SIZE(SEQ_HLPM_VLOUT3_SET) },
+	{SEQ_HLPM_GPARA_A3, ARRAY_SIZE(SEQ_HLPM_GPARA_A3) },
+	{SEQ_HLPM_SELECT, ARRAY_SIZE(SEQ_HLPM_SELECT) },
+	{SEQ_HLPM_ON_L, ARRAY_SIZE(SEQ_HLPM_ON_L), 1},
+	{SEQ_TEST_KEY_OFF_F0, ARRAY_SIZE(SEQ_TEST_KEY_OFF_F0) },
+};
+
+static struct lcd_seq_info LCD_SEQ_HLPM_OFF[] = {
+	{SEQ_TEST_KEY_ON_F0, ARRAY_SIZE(SEQ_TEST_KEY_ON_F0) },
+	{SEQ_HLPM_OFF, ARRAY_SIZE(SEQ_HLPM_OFF), 1},
+	{SEQ_TEST_KEY_OFF_F0, ARRAY_SIZE(SEQ_TEST_KEY_OFF_F0) },
+};
 #endif
 
-#if defined(CONFIG_SEC_FACTORY)
 static unsigned char SEQ_XTALK_B0[] = {
 	0xB0,
 	0x1C
@@ -265,19 +408,32 @@ static unsigned char SEQ_XTALK_OFF[] = {
 	0xC0
 };
 
+#if defined(CONFIG_SEC_FACTORY)
 static unsigned char SEQ_FD_ON[] = {
 	0xD5,
-	0x01
+	0x01	/* FD enable */
 };
 
 static unsigned char SEQ_FD_OFF[] = {
 	0xD5,
-	0x02
+	0x02	/* FD disable */
+};
+
+static unsigned char SEQ_ASWIRE_OFF[] = {
+	0xD5,
+	0x83, 0xFF, 0x5C, 0x44, 0x89, 0x89, 0x00, 0x00, 0x00, 0x01,	/* 10th para 0x01 FD enable */
+	0x00
 };
 
 static unsigned char SEQ_GPARA_FD[] = {
 	0xB0,
 	0x09
+};
+#else
+static unsigned char SEQ_ASWIRE_OFF[] = {
+	0xD5,
+	0x83, 0xFF, 0x5C, 0x44, 0x89, 0x89, 0x00, 0x00, 0x00, 0x00,	/* 10th para 0x00 FD Normal */
+	0x00
 };
 #endif
 
@@ -307,12 +463,19 @@ enum {
 	TRANS_DIMMING_MAX
 };
 
+enum {
+	ACL_DIMMING_OFF,
+	ACL_DIMMING_ON,
+	ACL_DIMMING_MAX
+};
+
 static unsigned char *HBM_TABLE[TRANS_DIMMING_MAX][HBM_STATUS_MAX] = {
-	{SEQ_HBM_OFF_DIMMING_OFF, SEQ_HBM_ON},
+	{SEQ_HBM_OFF_DIMMING_OFF, SEQ_HBM_ON_DIMMING_OFF},
 	{SEQ_HBM_OFF, SEQ_HBM_ON}
 };
 
 static unsigned char *ACL_TABLE[ACL_STATUS_MAX] = {SEQ_ACL_OFF, SEQ_ACL_08P, SEQ_ACL_15P};
+static unsigned char *ACL_DIM_TABLE[ACL_DIMMING_MAX] = {SEQ_ACL_DIM_OFF, SEQ_ACL_DIM_ON};
 
 /* platform brightness <-> acl opr and percent */
 static unsigned int brightness_opr_table[ACL_STATUS_MAX][EXTEND_BRIGHTNESS + 1] = {
@@ -339,7 +502,7 @@ static unsigned int brightness_table[EXTEND_BRIGHTNESS + 1] = {
 	316, 320, 323, 327, 330, 334, 337, 341, 344, 348,
 	351, 355, 358, 362, 365, 369, 372, 376, 379, 383,
 	387, 390, 394, 397, 401, 404, 408, 411, 415, 418,
-	422, 425, 429, 432, 436, 439, 443, 445, 451, 456,	/* 128: 445 */
+	422, 425, 429, 432, 436, 439, 443, 445, 451, 456, /* 128: 445 */
 	460, 465, 470, 474, 479, 483, 488, 492, 497, 500,
 	506, 510, 515, 520, 524, 529, 533, 538, 542, 547,
 	551, 556, 561, 565, 570, 574, 579, 583, 588, 592,
@@ -352,7 +515,7 @@ static unsigned int brightness_table[EXTEND_BRIGHTNESS + 1] = {
 	870, 875, 879, 884, 888, 893, 897, 902, 906, 911,
 	916, 920, 925, 929, 934, 938, 943, 947, 952, 956,
 	961, 966, 970, 975, 979, 984, 988, 993, 997, 1002,
-	1007, 1011, 1016, 1020, 1023, 5, 9, 12, 16, 20,	/* 225: 1023 */
+	1007, 1011, 1016, 1020, 1023, 5, 9, 12, 16, 20, /* 255: 1023 */
 	23, 27, 31, 34, 38, 42, 45, 49, 53, 55,
 	60, 64, 67, 71, 75, 78, 82, 86, 89, 93,
 	97, 100, 104, 108, 111, 115, 119, 123, 126, 130,
@@ -378,113 +541,4 @@ static unsigned int elvss_table[EXTEND_BRIGHTNESS + 1] = {
 	[350 ... EXTEND_BRIGHTNESS - 1] = 0x91,
 	[EXTEND_BRIGHTNESS] = 0x90,
 };
-
-#ifdef CONFIG_LCD_HMT
-#define DEFAULT_HMT_BRIGHTNESS			162
-
-static unsigned int hmt_brightness_table[EXTEND_BRIGHTNESS + 1] = {
-	[0 ... 3] = 268,
-	[4 ... 8] = 278,
-	[9 ... 12] = 288,
-	[13 ... 17] = 298,
-	[18 ... 21] = 308,
-	[22 ... 25] = 318,
-	[26 ... 30] = 328,
-	[31 ... 34] = 338,
-	[35 ... 39] = 348,
-	[40 ... 43] = 358,
-	[44 ... 47] = 368,
-	[48 ... 52] = 378,
-	[53 ... 56] = 388,
-	[57 ... 61] = 398,
-	[62 ... 65] = 408,
-	[66 ... 69] = 418,
-	[70 ... 74] = 428,
-	[74 ... 78] = 438,
-	[79 ... 83] = 448,
-	[84 ... 87] = 458,
-	[88 ... 91] = 468,
-	[92 ... 96] = 478,
-	[97 ... 100] = 488,
-	[101 ... 105] = 498,
-	[106 ... 119] = 508,
-	[110 ... 113] = 518,
-	[114 ... 118] = 528,
-	[119 ... 122] = 538,
-	[123 ... 127] = 548,
-	[128 ... 131] = 558,
-	[132 ... 135] = 568,
-	[136 ... 140] = 578,
-	[141 ... 144] = 588,
-	[145 ... 148] = 598,
-	[149 ... 153] = 608,
-	[154 ... 157] = 618,
-	[158 ... 162] = 628,
-	[163 ... 166] = 638,
-	[167 ... 170] = 648,
-	[171 ... 175] = 658,
-	[176 ... 179] = 668,
-	[180 ... 184] = 678,
-	[185 ... 188] = 688,
-	[189 ... 192] = 698,
-	[193 ... 197] = 708,
-	[198 ... 201] = 718,
-	[202 ... 206] = 728,
-	[207 ... 210] = 738,
-	[211 ... 214] = 748,
-	[215 ... 219] = 758,
-	[220 ... 223] = 768,
-	[224 ... 228] = 778,
-	[229 ... 232] = 788,
-	[233 ... 236] = 798,
-	[237 ... 241] = 808,
-	[242 ... 245] = 818,
-	[246 ... 250] = 828,
-	[251 ... 254] = 838,
-	[255 ... EXTEND_BRIGHTNESS] = 848,
-};
-/* when get OP code will modify */
-static unsigned char SEQ_GPARA_HMT_5F[] = {
-	0xB0,
-	0x5F
-};
-
-static unsigned char SEQ_HMT_AOR_80[] = {
-	0xB9,
-	0x01, 0xD8
-};
-
-static unsigned char SEQ_HMT_AOR_00[] = {
-	0xB9,
-	0x00, 0x14
-};
-
-static unsigned char SEQ_HMT_AID_ON[] = {
-	0xC0,
-	0x31, 0x01, 0x03, 0x00, 0x0E, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x50, 0x00, 0x00,
-	0x40, 0x3F, 0x00, 0x53, 0x00, 0x00, 0x00, 0x20, 0x06, 0x22,
-	0x31, 0x4B, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0xE0, 0x0B,
-	0x77, 0xD8, 0x00, 0x00, 0x00, 0x00, 0xFC, 0x00, 0x00, 0x00,
-	0xF6, 0x97, 0x06, 0x65, 0xE1, 0xCB, 0x0C, 0x2D, 0x8D, 0xED,
-	0xED, 0xED, 0xED, 0x8D
-};
-
-static unsigned char SEQ_HMT_AID_OFF[] = {
-	0xC0,
-	0x31, 0x01, 0x0B, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x50, 0x00, 0x00,
-	0x40, 0x3F, 0x00, 0x53, 0x00, 0x00, 0x00, 0x20, 0x06, 0x22,
-	0x31, 0x4B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xE0, 0x0B,
-	0x77, 0xD8, 0x00, 0x00, 0x00, 0x00, 0xFC, 0x00, 0x00, 0x00,
-	0xF6, 0x97, 0x06, 0x65, 0xE1, 0xCB, 0x0C, 0x2D, 0x8D, 0xED,
-	0xED, 0xED, 0xED, 0x0D,
-};
-
-static unsigned char SEQ_HMT_LTPS[] = {
-	0xC0,
-	0x31
-};
-#endif
-
 #endif /* __EA8076_PARAM_H__ */

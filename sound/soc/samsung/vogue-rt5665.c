@@ -43,6 +43,10 @@
 #define RT5665_CODEC_MAX	22
 #define RT5665_AUX_MAX		2
 
+#if defined(CONFIG_SND_SOC_RT5510)
+#define RT5510_DAI_ID		18
+#endif
+
 #define CLK_SRC_SCLK	0
 #define CLK_SRC_LRCLK	1
 #define CLK_SRC_PDM		2
@@ -80,11 +84,17 @@ struct rt5665_drvdata {
 	unsigned int pcm_state;
 	struct wake_lock wake_lock;
 	unsigned int wake_lock_switch;
+
+	int uaifp_count;
+	int uaifc_count;
 };
 
 static struct rt5665_drvdata exynos9610_drvdata;
+#if defined(CONFIG_SND_SOC_TFA9894)
+extern void exynos9610_set_xclkout0_13(void);
+#endif
 
-static struct snd_soc_pcm_runtime *rt5665_get_rtd(struct snd_soc_card *card,
+static struct snd_soc_pcm_runtime *exynos9610_get_rtd(struct snd_soc_card *card,
 	int id)
 {
 	struct snd_soc_dai_link *dai_link;
@@ -116,6 +126,24 @@ static int exynos9610_rt5665_hw_params(struct snd_pcm_substream *substream,
 	struct snd_soc_dai_link *dai_link = rtd->dai_link;
 
 	drvdata->pcm_state |= (1 << dai_link->id);
+
+	if ((drvdata->uaifp_count == 0) && (drvdata->uaifc_count == 0)) {
+		dev_info(card->dev, "%s: BCLK Enable\n", __func__);
+		snd_soc_dai_set_tristate(rtd->cpu_dai, 0);
+	}
+
+	if ((substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+			&& (drvdata->uaifp_count == 0)) {
+		drvdata->uaifp_count++;
+	} else if ((substream->stream == SNDRV_PCM_STREAM_CAPTURE)
+			&& (drvdata->uaifc_count == 0)) {
+		drvdata->uaifc_count++;
+	} else {
+		dev_err(card->dev, "%s: cnt check stream %d, uaifp_cnt %d, uaifc_cnt %d\n",
+			__func__, substream->stream, drvdata->uaifp_count, drvdata->uaifc_count);
+	}
+	dev_info(card->dev, "%s: uaifp_cnt %d, uaifc_cnt %d\n", __func__,
+			drvdata->uaifp_count, drvdata->uaifc_count);
 
 	dev_info(card->dev, "%s: %s-%d %dch, %dHz, %dbit, %dbytes (pcm_state: 0x%07x)\n",
 			__func__, rtd->dai_link->name, substream->stream,
@@ -155,6 +183,25 @@ static int exynos9610_rt5665_hw_free(struct snd_pcm_substream *substream)
 	dev_info(card->dev, "%s: %s-%d (pcm_state: 0x%07x)\n",
 			__func__, rtd->dai_link->name, substream->stream,
 			drvdata->pcm_state);
+
+	if ((substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+			&& (drvdata->uaifp_count > 0)) {
+		drvdata->uaifp_count--;
+	} else if ((substream->stream == SNDRV_PCM_STREAM_CAPTURE)
+			&& (drvdata->uaifc_count > 0)) {
+		drvdata->uaifc_count--;
+	} else {
+		dev_err(card->dev, "%s: cnt check stream %d, uaifp_cnt %d, uaifc_cnt %d\n",
+			__func__, substream->stream, drvdata->uaifp_count, drvdata->uaifc_count);
+	}
+
+	if ((drvdata->uaifp_count == 0) && (drvdata->uaifc_count == 0)) {
+		dev_info(card->dev, "%s: BCLK Disable\n", __func__);
+		snd_soc_dai_set_tristate(rtd->cpu_dai, 1);
+	}
+
+	dev_info(card->dev, "%s: uaifp_cnt %d, uaifc_cnt %d\n", __func__,
+			drvdata->uaifp_count, drvdata->uaifc_count);
 
 	return 0;
 }
@@ -272,15 +319,23 @@ static int exynos9610_late_probe(struct snd_soc_card *card)
 	const char *prefix;
 	int i;
 	struct rt5665_drvdata *drvdata = snd_soc_card_get_drvdata(card);
+#if defined(CONFIG_SND_SOC_RT5510)
+	struct snd_soc_codec *spk_amp;
+	struct snd_soc_dai *aif2_dai;
+#endif
 
 	dev_info(card->dev, "%s\n", __func__);
 
-	aif1_dai = rt5665_get_rtd(card, 0)->cpu_dai;
+	aif1_dai = exynos9610_get_rtd(card, 0)->cpu_dai;
 	cpu = aif1_dai->component;
 
-	aif1_dai = rt5665_get_rtd(card, RT5665_DAI_ID)->codec_dai;
+	aif1_dai = exynos9610_get_rtd(card, RT5665_DAI_ID)->codec_dai;
 	codec = aif1_dai->codec;
 
+#if defined(CONFIG_SND_SOC_RT5510)
+	aif2_dai = exynos9610_get_rtd(card, RT5510_DAI_ID)->codec_dai;
+	spk_amp = aif2_dai->codec;
+#endif
 	drvdata->codec = codec;
 
 	/* close codec device immediately when pcm is closed */
@@ -301,6 +356,12 @@ static int exynos9610_late_probe(struct snd_soc_card *card)
 	snd_soc_dapm_ignore_suspend(snd_soc_codec_get_dapm(codec), "AIF1_1 Capture");
 	snd_soc_dapm_sync(snd_soc_codec_get_dapm(codec));
 
+#if defined(CONFIG_SND_SOC_RT5510)
+	snd_soc_dapm_ignore_suspend(snd_soc_codec_get_dapm(spk_amp), "aif_playback");
+	snd_soc_dapm_ignore_suspend(snd_soc_codec_get_dapm(spk_amp), "aif_capture");
+	snd_soc_dapm_sync(snd_soc_codec_get_dapm(spk_amp));
+#endif
+
 	snd_soc_dapm_ignore_suspend(snd_soc_component_get_dapm(cpu), "ABOX RDMA0 Playback");
 	snd_soc_dapm_ignore_suspend(snd_soc_component_get_dapm(cpu), "ABOX RDMA1 Playback");
 	snd_soc_dapm_ignore_suspend(snd_soc_component_get_dapm(cpu), "ABOX RDMA2 Playback");
@@ -317,7 +378,7 @@ static int exynos9610_late_probe(struct snd_soc_card *card)
 	snd_soc_dapm_sync(snd_soc_component_get_dapm(cpu));
 
 	for (i = 0; i < UAIF_COUNT; i++) {
-		aif1_dai = rt5665_get_rtd(card, UAIF_START + i)->cpu_dai;
+		aif1_dai = exynos9610_get_rtd(card, UAIF_START + i)->cpu_dai;
 		cpu = aif1_dai->component;
 		dapm = snd_soc_component_get_dapm(cpu);
 		prefix = dapm->component->name_prefix;
@@ -329,7 +390,7 @@ static int exynos9610_late_probe(struct snd_soc_card *card)
 	}
 
 	for (i = 0; i < SIFS_COUNT; i++) {
-		aif1_dai = rt5665_get_rtd(card, SIFS_START + i)->cpu_dai;
+		aif1_dai = exynos9610_get_rtd(card, SIFS_START + i)->cpu_dai;
 		cpu = aif1_dai->component;
 		dapm = snd_soc_component_get_dapm(cpu);
 		prefix = dapm->component->name_prefix;
@@ -340,7 +401,7 @@ static int exynos9610_late_probe(struct snd_soc_card *card)
 		snd_soc_dapm_sync(dapm);
 	}
 
-	aif1_dai = rt5665_get_rtd(card, SPDY_START)->cpu_dai;
+	aif1_dai = exynos9610_get_rtd(card, SPDY_START)->cpu_dai;
 	cpu = aif1_dai->component;
 	dapm = snd_soc_component_get_dapm(cpu);
 	prefix = dapm->component->name_prefix;
@@ -749,8 +810,10 @@ static struct snd_soc_dai_link exynos9610_dai[] = {
 		.name = "UAIF1",
 		.stream_name = "UAIF1",
 		.platform_name = "snd-soc-dummy",
+#if !defined(CONFIG_SND_SOC_TFA9894)
 		.codec_name = "snd-soc-dummy",
 		.codec_dai_name = "snd-soc-dummy-dai",
+#endif
 		.no_pcm = 1,
 		.ignore_suspend = 1,
 		.ignore_pmdown_time = 1,
@@ -920,9 +983,12 @@ static int read_codec(struct device_node *np, struct device *dev,
 
 static void control_xclkout(bool on)
 {
-	if (on)
+	if (on) {
 		clk_prepare_enable(xclkout);
-	else
+#if defined(CONFIG_SND_SOC_TFA9894)
+		exynos9610_set_xclkout0_13();
+#endif
+	} else
 		clk_disable_unprepare(xclkout);
 }
 

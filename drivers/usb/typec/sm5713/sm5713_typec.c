@@ -54,6 +54,9 @@ static enum ccic_sysfs_property sm5713_sysfs_properties[] = {
 	CCIC_SYSFS_PROP_ACC_DEVICE_VERSION,
 	CCIC_SYSFS_PROP_USBPD_IDS,
 	CCIC_SYSFS_PROP_USBPD_TYPE,
+#if defined(CONFIG_SEC_FACTORY)
+	CCIC_SYSFS_PROP_VBUS_ADC,
+#endif
 };
 #endif
 #if defined(CONFIG_DUAL_ROLE_USB_INTF)
@@ -234,18 +237,6 @@ static int sm5713_set_detach(struct sm5713_phydrv_data *pdic_data, u8 mode)
 	return ret;
 }
 
-static void sm5713_usbpd_abnormal_reset_check(struct sm5713_phydrv_data *pdic_data)
-{
-	struct i2c_client *i2c = pdic_data->i2c;
-	u8 reg_data = 0;
-
-	sm5713_usbpd_read_reg(i2c, SM5713_REG_CC_CNTL1, &reg_data);
-	pr_info("%s, CC_CNTL2 : 0x%x\n", __func__, reg_data);
-
-	if (reg_data == 0x84) /* surge reset */
-		sm5713_usbpd_reg_init(pdic_data);
-}
-
 static int sm5713_set_vconn_source(void *_data, int val)
 {
 	struct sm5713_usbpd_data *data = (struct sm5713_usbpd_data *) _data;
@@ -302,8 +293,11 @@ static int sm5713_set_lpm_mode(struct sm5713_phydrv_data *pdic_data)
 	struct device *dev = &i2c->dev;
 
 	pdic_data->lpm_mode = true;
-
+#if defined(CONFIG_SM5713_WATER_DETECTION_ENABLE)
 	sm5713_usbpd_write_reg(i2c, SM5713_REG_CORR_CNTL4, 0x97);
+#else
+	sm5713_usbpd_write_reg(i2c, SM5713_REG_CORR_CNTL4, 0x92);
+#endif
 
 	dev_info(dev, "%s sm5713 enter lpm mode\n", __func__);
 
@@ -354,7 +348,30 @@ static void sm5713_corr_sbu_volt_read(void *_data, u8 *adc_sbu1,
 	pr_info("%s, mode : %d, SBU1_VOLT : 0x%x, SBU2_VOLT : 0x%x\n",
 			__func__, mode, adc_value1, adc_value2);
 }
+#if defined(CONFIG_SEC_FACTORY)
+static int sm5713_vbus_adc_read(void *_data)
+{
+	struct sm5713_phydrv_data *pdic_data = _data;
+	struct i2c_client *i2c = NULL;
+	u8 vbus_adc = 0, status1 = 0;
 
+	if (!pdic_data)
+		return -ENXIO;
+
+	i2c = pdic_data->i2c;
+	if (!i2c)
+		return -ENXIO;
+
+	sm5713_usbpd_read_reg(i2c, SM5713_REG_STATUS1, &status1);
+	sm5713_usbpd_write_reg(i2c, SM5713_REG_ADC_CTRL1, SM5713_ADC_PATH_SEL_VBUS);
+	sm5713_adc_value_read(pdic_data, &vbus_adc);
+
+	pr_info("%s, STATUS1 = 0x%x, VBUS_VOLT : 0x%x\n",
+			__func__, status1, vbus_adc);
+
+	return vbus_adc; /* 0 is OK, others are NG */
+}
+#endif
 #if defined(CONFIG_SM5713_WATER_DETECTION_ENABLE)
 static void sm5713_process_cc_water_det(void *data, int state)
 {
@@ -468,6 +485,10 @@ static void sm5713_notify_rp_current_level(void *_data)
 #if defined(CONFIG_TYPEC)
 	enum typec_pwr_opmode mode = TYPEC_PWR_MODE_USB;
 #endif
+
+	if (pdic_data->is_cc_abnormal_state ||
+			pdic_data->is_sbu_abnormal_state)
+		return;
 
 	sm5713_usbpd_read_reg(i2c, SM5713_REG_CC_STATUS, &cc_status);
 
@@ -1149,6 +1170,10 @@ void sm5713_ccic_event_work(void *data, int dest,
 	pr_info("%s : usb: DIAES %d-%d-%d-%d-%d\n",
 		__func__, dest, id, attach, event, sub);
 	event_work = kmalloc(sizeof(struct ccic_state_work), GFP_ATOMIC);
+	if (!event_work) {
+		pr_err("%s: failed to allocate event_work\n", __func__);
+		return;
+	}
 	INIT_WORK(&event_work->ccic_work, sm5713_ccic_event_notifier);
 
 	event_work->dest = dest;
@@ -1314,7 +1339,7 @@ static int sm5713_sysfs_get_prop(struct _ccic_data_t *pccic_data,
 #if defined(CONFIG_SM5713_WATER_DETECTION_ENABLE)
 		retval = sprintf(buf, "%d\n", usbpd_data->is_water_detect);
 #else
-		retval = sprintf(buf, "not support water detection\n");
+		retval = sprintf(buf, "0\n");
 #endif
 		pr_info("%s : CCIC_SYSFS_PROP_FW_WATER : %s", __func__, buf);
 		break;
@@ -1337,6 +1362,13 @@ static int sm5713_sysfs_get_prop(struct _ccic_data_t *pccic_data,
 		retval = sprintf(buf, "%d\n", manager->acc_type);
 		pr_info("%s : CCIC_SYSFS_PROP_USBPD_TYPE : %s", __func__, buf);
 		break;
+#if defined(CONFIG_SEC_FACTORY)
+	case CCIC_SYSFS_PROP_VBUS_ADC:
+		manager->vbus_adc = sm5713_vbus_adc_read(usbpd_data);
+		retval = sprintf(buf, "%d\n", manager->vbus_adc);
+		pr_info("%s : CCIC_SYSFS_PROP_VBUS_ADC : %s", __func__, buf);
+		break;
+#endif
 	default:
 		pr_info("%s : prop read not supported prop (%d)\n",
 				__func__, prop);
@@ -1708,6 +1740,21 @@ bool sm5713_check_vbus_state(void *_data)
 		return false;
 }
 
+static void sm5713_usbpd_abnormal_reset_check(struct sm5713_phydrv_data *pdic_data)
+{
+	struct i2c_client *i2c = pdic_data->i2c;
+	struct sm5713_usbpd_data *pd_data = dev_get_drvdata(pdic_data->dev);
+	u8 reg_data = 0;
+
+	sm5713_usbpd_read_reg(i2c, SM5713_REG_CC_CNTL1, &reg_data);
+	pr_info("%s, CC_CNTL1 : 0x%x\n", __func__, reg_data);
+
+	if (reg_data == 0x84) { /* surge reset */
+		sm5713_driver_reset(pd_data);
+		sm5713_usbpd_reg_init(pdic_data);
+	}
+}
+
 static void sm5713_assert_rd(void *_data)
 {
 	struct sm5713_usbpd_data *data = (struct sm5713_usbpd_data *) _data;
@@ -1795,7 +1842,25 @@ static bool sm5713_poll_status(void *_data, int irq)
 			pdic_data->is_sbu_abnormal_state = false;
 		if (pdic_data->is_cc_abnormal_state)
 			pdic_data->is_cc_abnormal_state = false;
+#if defined(CONFIG_SM5713_WATER_DETECTION_ENABLE)
+		if (status[2] & SM5713_REG_INT_STATUS3_WATER) {
+			/* Water Detection CC & SBU Threshold 1Mohm */
+			sm5713_usbpd_write_reg(i2c, 0x94, 0x0C);
+			/* Water Detection DET Threshold 1Mohm */
+			sm5713_usbpd_write_reg(i2c, SM5713_REG_CORR_CNTL2, 0x1F);		
+		}
+#endif
 	}
+
+#if defined(CONFIG_SM5713_WATER_DETECTION_ENABLE)
+	if ((intr[0] & SM5713_REG_INT_STATUS1_DET_DETECT) &&
+			(status[2] & SM5713_REG_INT_STATUS3_WATER_RLS)) {
+		/* Water Detection CC & SBU Threshold 1Mohm */
+		sm5713_usbpd_write_reg(i2c, 0x94, 0x0C);
+		/* Water Detection DET Threshold 1Mohm */
+		sm5713_usbpd_write_reg(i2c, SM5713_REG_CORR_CNTL2, 0x1F);		
+	}
+#endif
 
 	if ((intr[4] & SM5713_REG_INT_STATUS5_CC_ABNORMAL_ST) &&
 			(status[4] & SM5713_REG_INT_STATUS5_CC_ABNORMAL_ST)) {
@@ -1819,8 +1884,12 @@ static bool sm5713_poll_status(void *_data, int irq)
 #if defined(CONFIG_SM5713_WATER_DETECTION_ENABLE)
 	if ((intr[2] & SM5713_REG_INT_STATUS3_WATER) &&
 			(status[2] & SM5713_REG_INT_STATUS3_WATER)) {
-			pdic_data->is_water_detect = true;
-			sm5713_process_cc_water_det(pdic_data, WATER_MODE_ON);
+		pdic_data->is_water_detect = true;
+		sm5713_process_cc_water_det(pdic_data, WATER_MODE_ON);
+
+		if (status[0] & SM5713_REG_INT_STATUS1_VBUSUVLO)
+			schedule_delayed_work(&pdic_data->wat_pd_ta_work,
+					msecs_to_jiffies(3000));
 	}
 #endif
 	if ((intr[1] & SM5713_REG_INT_STATUS2_SRC_ADV_CHG) &&
@@ -1835,6 +1904,14 @@ static bool sm5713_poll_status(void *_data, int irq)
 				CCIC_NOTIFY_DETACH/*attach*/,
 				USB_STATUS_NOTIFY_DETACH/*rprd*/, 0);
 		}
+
+#if defined(CONFIG_SM5713_WATER_DETECTION_ENABLE)
+		if (status[2] & SM5713_REG_INT_STATUS3_WATER) {
+			sm5713_usbpd_write_reg(i2c, SM5713_REG_CORR_CNTL5, 0x00);
+			schedule_delayed_work(&pdic_data->wat_pd_ta_work,
+					msecs_to_jiffies(3000));
+		}
+#endif
 	}
 
 	if ((intr[0] & SM5713_REG_INT_STATUS1_VBUSPOK) &&
@@ -1844,9 +1921,14 @@ static bool sm5713_poll_status(void *_data, int irq)
 #if defined(CONFIG_SM5713_WATER_DETECTION_ENABLE)
 	if (intr[2] & SM5713_REG_INT_STATUS3_WATER_RLS) {
 		if ((intr[2] & SM5713_REG_INT_STATUS3_WATER) == 0 &&
-				pdic_data->is_water_detect) {
+				pdic_data->is_water_detect && !lpcharge) {
 			pdic_data->is_water_detect = false;
 			sm5713_process_cc_water_det(pdic_data, WATER_MODE_OFF);
+			cancel_delayed_work(&pdic_data->wat_pd_ta_work);
+			/* Water Detection CC & SBU Threshold 500kohm */
+			sm5713_usbpd_write_reg(i2c, 0x94, 0x06);
+			/* Water Detection DET Threshold 500kohm */
+			sm5713_usbpd_write_reg(i2c, SM5713_REG_CORR_CNTL2, 0x0F);
 		}
 	}
 #endif
@@ -1856,7 +1938,7 @@ static bool sm5713_poll_status(void *_data, int irq)
 		sm5713_set_vconn_source(data, USBPD_VCONN_OFF);
 #if defined(CONFIG_SM5713_WATER_DETECTION_ENABLE)
 		if (status[2] & SM5713_REG_INT_STATUS3_WATER_RLS &&
-				pdic_data->is_water_detect) {
+				pdic_data->is_water_detect && !lpcharge) {
 			pdic_data->is_water_detect = false;
 			sm5713_process_cc_water_det(pdic_data, WATER_MODE_OFF);
 		}
@@ -2394,6 +2476,40 @@ static void sm5713_execute_rx_buffer(struct work_struct *work)
 	pr_info("%s\n", __func__);
 }
 
+#if defined(CONFIG_SM5713_WATER_DETECTION_ENABLE)
+static void sm5713_check_water_pd_ta(struct work_struct *work)
+{
+	struct sm5713_phydrv_data *pdic_data = container_of(work,
+			struct sm5713_phydrv_data, wat_pd_ta_work.work);
+	struct i2c_client *i2c = pdic_data->i2c;
+	u8 reg_data = 0, vbus_state = 0;
+
+	sm5713_usbpd_read_reg(i2c, SM5713_REG_STATUS1, &vbus_state);
+
+	pr_info("%s: vbus_state=0x%d ++\n", __func__, vbus_state);
+
+	if (vbus_state & SM5713_REG_INT_STATUS1_VBUSPOK) {
+		return;
+	} else {
+		sm5713_usbpd_read_reg(i2c, SM5713_REG_PD_STATE4, &reg_data);
+		if ((reg_data >> 4) == 0x9) { /* Rp charger is detected */
+			sm5713_usbpd_write_reg(i2c, SM5713_REG_CORR_CNTL5, 0x02);
+			msleep(200);
+
+			sm5713_usbpd_read_reg(i2c, SM5713_REG_STATUS1, &vbus_state);
+			if (vbus_state & SM5713_REG_INT_STATUS1_VBUSPOK)
+				return;
+			else
+				sm5713_usbpd_write_reg(i2c, SM5713_REG_CORR_CNTL5, 0x00);
+		}
+		schedule_delayed_work(&pdic_data->wat_pd_ta_work,
+				msecs_to_jiffies(3000));
+	}
+
+	pr_info("%s: --\n", __func__);
+}
+#endif
+
 #if defined(CONFIG_IF_CB_MANAGER)
 struct usbpd_ops ops_usbpd = {
 	.usbpd_sbu_test_read = sm5713_usbpd_sbu_test_read,
@@ -2594,6 +2710,14 @@ static int sm5713_usbpd_notify_attach(void *data)
 			pdic_data->data_role != USB_STATUS_NOTIFY_DETACH)
 			dual_role_instance_changed(pdic_data->dual_role);
 #elif defined(CONFIG_TYPEC)
+		if (!pdic_data->detach_valid &&
+			pdic_data->typec_data_role == TYPEC_DEVICE) {
+			sm5713_ccic_event_work(pdic_data,
+				CCIC_NOTIFY_DEV_USB, CCIC_NOTIFY_ID_USB,
+				CCIC_NOTIFY_DETACH/*attach*/,
+				USB_STATUS_NOTIFY_DETACH/*drp*/, 0);
+			dev_info(dev, "directly called from UFP to DFP\n");
+		}
 		pdic_data->typec_power_role = TYPEC_SOURCE;
 		typec_set_pwr_role(pdic_data->port, TYPEC_SOURCE);
 #endif
@@ -2878,7 +3002,21 @@ static int sm5713_usbpd_reg_init(struct sm5713_phydrv_data *_data)
 	/* Release SBU Sourcing */
 	sm5713_usbpd_write_reg(i2c, SM5713_REG_CORR_CNTL5, 0x00);
 #if defined(CONFIG_SM5713_WATER_DETECTION_ENABLE)
-	sm5713_usbpd_write_reg(i2c, SM5713_REG_CORR_CNTL4, 0x97);
+	sm5713_usbpd_write_reg(i2c, SM5713_REG_CORR_CNTL4, 0x93);
+	/* Water Detection CC & SBU Threshold 500kohm */
+	sm5713_usbpd_write_reg(i2c, 0x94, 0x06);
+	/* Water Detection DET Threshold 500kohm */
+	sm5713_usbpd_write_reg(i2c, SM5713_REG_CORR_CNTL2, 0x0F);	
+	/* Water Release CC & SBU Threshold 600kohm */
+	sm5713_usbpd_write_reg(i2c, 0x96, 0x04);
+	/* Water Release condition set enable */
+	sm5713_usbpd_write_reg(i2c, 0x9E, 0x43);
+	/* Water Release condition [CC or SBU] */
+	sm5713_usbpd_write_reg(i2c, 0xA4, 0x06);
+	/* Water Release DET Threshold 600kohm */
+	sm5713_usbpd_write_reg(i2c, 0xA6, 0x04);
+	/* Water Release condition set disble */
+	sm5713_usbpd_write_reg(i2c, 0x9E, 0x42);
 #else
 	sm5713_usbpd_write_reg(i2c, SM5713_REG_CORR_CNTL4, 0x92);
 #endif
@@ -2890,18 +3028,6 @@ static int sm5713_usbpd_reg_init(struct sm5713_phydrv_data *_data)
 	/* Wake-up when cable is attached */
 	sm5713_usbpd_write_reg(i2c, 0x9A, 0x11);
 
-	/* Water Detection CC & SBU Threshold 1Mohm */
-	sm5713_usbpd_write_reg(i2c, 0x94, 0x0C);
-	/* Water Release CC & SBU Threshold 1.2Mohm */
-	sm5713_usbpd_write_reg(i2c, 0x96, 0x07);
-	/* Water Release condition set enable */
-	sm5713_usbpd_write_reg(i2c, 0x9E, 0x43);
-	/* Water Release condition [CC and SBU] */
-	sm5713_usbpd_write_reg(i2c, 0xA4, 0x07);
-	/* Water Release DET Threshold 1.2Mohm */
-	sm5713_usbpd_write_reg(i2c, 0xA6, 0x09);
-	/* Water Release condition set disble */
-	sm5713_usbpd_write_reg(i2c, 0x9E, 0x42);
 	/* DET 100uA Sourcing */
 	sm5713_usbpd_write_reg(i2c, 0x93, 0x0E);
 	/* Water Release Period = 10s */
@@ -3228,6 +3354,9 @@ static int sm5713_usbpd_probe(struct i2c_client *i2c,
 #endif
 #if defined(CONFIG_VBUS_NOTIFIER)
 	INIT_DELAYED_WORK(&pdic_data->vbus_noti_work, sm5713_usbpd_handle_vbus);
+#endif
+#if defined(CONFIG_SM5713_WATER_DETECTION_ENABLE)
+	INIT_DELAYED_WORK(&pdic_data->wat_pd_ta_work, sm5713_check_water_pd_ta);
 #endif
 	INIT_DELAYED_WORK(&pdic_data->rx_buf_work, sm5713_execute_rx_buffer);
 	INIT_DELAYED_WORK(&pdic_data->vbus_dischg_work,

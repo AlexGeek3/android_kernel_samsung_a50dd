@@ -316,6 +316,7 @@ struct sm5713_muic_data {
 	int fled_torch_enable;
 	int fled_flash_enable;
 	int vbus_state;
+	int hv_voltage;
 
 	struct delayed_work	afc_retry_work;
 	struct delayed_work	afc_torch_work;

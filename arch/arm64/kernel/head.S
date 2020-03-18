@@ -93,7 +93,11 @@ _head:
 #else
 	.quad	0				// reserved
 #endif
-	.quad	0				// reserved
+#ifdef CONFIG_PROCA
+	le64sym	_proca_conf_offset		// memory info for proca ta
+#else
+	.quad	0xecefecef			// Magic number for proca ta
+#endif
 	.quad	0				// reserved
 	.ascii	"ARM\x64"			// Magic number
 #ifdef CONFIG_EFI

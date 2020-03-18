@@ -118,6 +118,9 @@
 #define SM5713_ADC_PATH_SEL_CC2				0x07
 #define SM5713_ADC_PATH_SEL_SBU1			0x09
 #define SM5713_ADC_PATH_SEL_SBU2			0x0B
+#if defined(CONFIG_SEC_FACTORY)
+#define SM5713_ADC_PATH_SEL_VBUS			0x0F
+#endif
 #define SM5713_ADC_DONE						0x80
 
 /* For SM5713_REG_TX_REQ_MESSAGE */
@@ -159,6 +162,7 @@ enum sm5713_usbpd_reg {
 	SM5713_REG_ADC_CTRL1			= 0x19,
 	SM5713_REG_ADC_CTRL2			= 0x1A,
 	SM5713_REG_SYS_CNTL			= 0x1B,
+	SM5713_REG_CORR_CNTL2			= 0x21,
 	SM5713_REG_CORR_CNTL4			= 0x23,
 	SM5713_REG_CORR_CNTL5			= 0x24,
 	SM5713_REG_CC_STATUS			= 0x28,
@@ -297,6 +301,9 @@ struct sm5713_phydrv_data {
 #endif
 #if defined(CONFIG_VBUS_NOTIFIER)
 	struct delayed_work vbus_noti_work;
+#endif
+#if defined(CONFIG_SM5713_WATER_DETECTION_ENABLE)
+	struct delayed_work wat_pd_ta_work;
 #endif
 	struct delayed_work rx_buf_work;
 	struct delayed_work vbus_dischg_work;

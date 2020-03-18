@@ -496,7 +496,7 @@ ssize_t scsc_shm_ant_write(struct file *file, const char __user *buf, size_t cou
 	size_t  ant_pkt_len;
 	ssize_t written = 0;
 	ssize_t ret = 0;
-    size_t  pkt_count = 0;
+	size_t  pkt_count = 0;
 
 	SCSC_TAG_DEBUG(BT_H4, "enter\n");
 
@@ -520,8 +520,8 @@ ssize_t scsc_shm_ant_write(struct file *file, const char __user *buf, size_t cou
 	while (written != count && ret == 0) {
 		length = min(count - written, sizeof(ant_write_buffer) - ant_service.ant_write_offset);
 		SCSC_TAG_DEBUG(BT_H4, "count: %zu, length: %zu, ant_write_offset: %zu, written:%zu, size:%zu\n",
-                   count, length, ant_service.ant_write_offset,
-                   written - (pkt_count * 2), sizeof(ant_write_buffer));
+			       count, length, ant_service.ant_write_offset,
+				   written - (pkt_count * 2), sizeof(ant_write_buffer));
 
 		/* Is there room in the temp buffer */
 		if (length == 0) {
@@ -546,7 +546,7 @@ ssize_t scsc_shm_ant_write(struct file *file, const char __user *buf, size_t cou
 					ret = scsc_shm_ant_data_write(&ant_write_buffer[2], ant_pkt_len - 2);
 					if (ret >= 0) {
 						written += (ant_pkt_len - ant_service.ant_write_offset);
-                        pkt_count += 1;
+						pkt_count += 1;
 						ant_service.ant_write_offset = 0;
 						ret = 0;
 					}
@@ -569,7 +569,7 @@ ssize_t scsc_shm_ant_write(struct file *file, const char __user *buf, size_t cou
 					ret = scsc_shm_ant_cmd_write(&ant_write_buffer[2], ant_pkt_len - 2);
 					if (ret >= 0) {
 						written += (ant_pkt_len - ant_service.ant_write_offset);
-                        pkt_count += 1;
+						pkt_count += 1;
 						ant_service.ant_write_offset = 0;
 						ret = 0;
 					}
@@ -597,7 +597,7 @@ ssize_t scsc_shm_ant_write(struct file *file, const char __user *buf, size_t cou
 	}
 
 	SCSC_TAG_DEBUG(BT_H4, "ant_write_offset=%zu, ret=%zu, written=%zu\n",
-               ant_service.ant_write_offset, ret, written - (pkt_count * 2));
+		       ant_service.ant_write_offset, ret, written - (pkt_count * 2));
 
 	/* Decrease the ant readers counter */
 	atomic_dec(&ant_service.ant_writers);

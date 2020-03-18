@@ -264,6 +264,17 @@ int fimc_is_parse_dt(struct platform_device *pdev)
 	probe_info("ret(%d) secure_mem_info(%#08lx, %#08lx)", ret,
 		core->secure_mem_info[0], core->secure_mem_info[1]);
 
+	ret = of_property_read_u32_array(np, "non_secure_mem_info", mem_info, 2);
+	if (ret) {
+		core->non_secure_mem_info[0] = 0;
+		core->non_secure_mem_info[1] = 0;
+	} else {
+		core->non_secure_mem_info[0] = mem_info[0];
+		core->non_secure_mem_info[1] = mem_info[1];
+	}
+	probe_info("ret(%d) non_secure_mem_info(%#08lx, %#08lx)", ret,
+		core->non_secure_mem_info[0], core->non_secure_mem_info[1]);
+
 	vender_np = of_find_node_by_name(np, "vender");
 	if (vender_np) {
 		ret = fimc_is_vender_dt(vender_np);
@@ -346,6 +357,16 @@ int fimc_is_sensor_parse_dt(struct platform_device *pdev)
 	ret = of_property_read_u32(dnode, "multi_ch", &pdata->multi_ch);
 	if (ret) {
 		probe_info("skip multi_ch bool data read (%d)", ret);
+	}
+
+	ret = of_property_read_u32(dnode, "camif_mux_val", &pdata->camif_mux_val);
+	if (ret) {
+		probe_info("skip camif sysreg mux default value read (%d)", ret);
+	}
+
+	ret = of_property_read_u32(dnode, "camif_mux_val_s", &pdata->camif_mux_val_s);
+	if (ret) {
+		probe_info("skip camif sysreg mux default(S) value read (%d)", ret);
 	}
 
 	elems = of_property_count_u32_elems(dnode, "dma_ch");
@@ -724,24 +745,6 @@ int fimc_is_module_parse_dt(struct device *dev,
 	if (ret) {
 		probe_err("position read is fail(%d)", ret);
 		goto p_err;
-	}
-
-	ret = of_property_read_u32(dnode, "rom_id", &pdata->rom_id);
-	if (ret) {
-		probe_info("rom_id dt parsing skipped\n");
-		pdata->rom_id = ROM_ID_NOTHING;
-	}
-
-	ret = of_property_read_u32(dnode, "rom_type", &pdata->rom_type);
-	if (ret) {
-		probe_info("rom_type dt parsing skipped\n");
-		pdata->rom_type = 0;
-	}
-
-	ret = of_property_read_u32(dnode, "rom_cal_index", &pdata->rom_cal_index);
-	if (ret) {
-		probe_info("rom_cal_index dt parsing skipped\n");
-		pdata->rom_cal_index = 0;
 	}
 
 	af_np = of_find_node_by_name(dnode, "af");

@@ -12,12 +12,14 @@
  *
  */
 
- #ifndef _LINUX_ISA1000_H
- #define _LINUX_ISA1000_H
+#ifndef _LINUX_ISA1000_H
+#define _LINUX_ISA1000_H
 
- #define MAX_TIMEOUT	10000
+#define MAX_TIMEOUT	10000
 
- struct isa1000_pdata {
+#define VIB_BUFSIZE	30
+
+struct isa1000_pdata {
 	u32 duty;
  	u32 period;
  	u32 max_timeout;
@@ -27,7 +29,8 @@
 	int min_value;
 	int min_intensity;
 	const char* regulator_name;
- };
+	const char* vib_type;
+};
 
- #endif	/* _LINUX_ISA1000_H */
+#endif	/* _LINUX_ISA1000_H */
 

@@ -46,4 +46,16 @@ enum ist40xx_origins {
  */
 #define INPUT_FEATURE_ENABLE_SETTINGS_AOT	(1 << 0) /* Double tap wakeup settings */
 
+#define IST40XX_ALGORITHM_ADDR      IST40XX_DA_ADDR(0x00000A18)
+
+#define LOG_MEMX_CP	1
+#define LOG_ROM_CP	2
+#define LOG_CDC		3
+#define LOG_BASE	4
+#define LOG_LOFS	5
+#define LOG_CM		6
+#define LOG_GAP		7
+#define LOG_CS		8
+#define LOG_MISCAL	9
+
 #endif  // __IST40XX_SEC_H__

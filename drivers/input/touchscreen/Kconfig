@@ -1249,5 +1249,5 @@ config TOUCHSCREEN_ROHM_BU21023
 source "drivers/input/touchscreen/synaptics_dsx/Kconfig"
 source "drivers/input/touchscreen/sec_ts/Kconfig"
 source "drivers/input/touchscreen/imagis_40xx/Kconfig"
-source "drivers/input/touchscreen/melfas_mss100/Kconfig"
+source "drivers/input/touchscreen/melfas/mss100/Kconfig"
 endif

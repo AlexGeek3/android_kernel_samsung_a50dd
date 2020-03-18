@@ -289,6 +289,7 @@ static int gpu_dvfs_update_config_data_from_dt(struct kbase_device *kbdev)
 #else
 	gpu_update_config_data_int(np, "gpu_max_clock_limit", &platform->gpu_max_clock_limit);
 #endif
+	GPU_LOG(DVFS_WARNING, DUMMY, 0u, 0u, "gpu_max_colck_limit:%d\n", platform->gpu_max_clock_limit);
 	gpu_update_config_data_int(np, "gpu_min_clock", &platform->gpu_min_clock);
 	gpu_update_config_data_int(np, "gpu_dvfs_bl_config_clock", &platform->gpu_dvfs_config_clock);
 	gpu_update_config_data_int(np, "gpu_default_voltage", &platform->gpu_default_vol);

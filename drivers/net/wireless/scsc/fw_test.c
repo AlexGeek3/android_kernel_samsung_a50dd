@@ -1,6 +1,6 @@
 /*****************************************************************************
  *
- * Copyright (c) 2018 Samsung Electronics Co., Ltd. All rights reserved
+ * Copyright (c) 2019 Samsung Electronics Co., Ltd. All rights reserved
  *
  *****************************************************************************/
 #include <net/cfg80211.h>
@@ -354,7 +354,7 @@ static void slsi_fw_test_connect_start_ap(struct slsi_dev *sdev, struct net_devi
 	if (WARN_ON(!ieee80211_is_assoc_req(mgmt->frame_control) &&
 		    !ieee80211_is_reassoc_req(mgmt->frame_control)))
 		return;
-	peer_index = fapi_get_u16(skb, u.mlme_procedure_started_ind.peer_index);
+	peer_index = fapi_get_u16(skb, u.mlme_procedure_started_ind.association_identifier);
 
 	peer = slsi_peer_add(sdev, dev, mgmt->sa, peer_index);
 	if (WARN_ON(!peer))
@@ -368,23 +368,23 @@ static void slsi_fw_test_connected_network(struct slsi_dev *sdev, struct net_dev
 {
 	struct netdev_vif *ndev_vif = netdev_priv(dev);
 	struct slsi_peer  *peer = NULL;
-	u16               peer_index = fapi_get_u16(skb, u.mlme_connected_ind.peer_index);
+	u16               aid = fapi_get_u16(skb, u.mlme_connected_ind.association_identifier);
 
 	SLSI_UNUSED_PARAMETER(fwtest);
 
 	WARN_ON(!SLSI_MUTEX_IS_LOCKED(ndev_vif->vif_mutex));
 
-	SLSI_NET_DBG1(dev, SLSI_FW_TEST, "Network Peer Connect(vif:%d, peer_index:%d)\n", ndev_vif->ifnum, peer_index);
+	SLSI_NET_DBG1(dev, SLSI_FW_TEST, "Network Peer Connect(vif:%d, aid:%d)\n", ndev_vif->ifnum, aid);
 	WARN(!ndev_vif->is_fw_test, "!is_fw_test");
 
 	if (WARN(!ndev_vif->activated, "Not Activated"))
 		return;
 
-	if (WARN_ON(peer_index > SLSI_PEER_INDEX_MAX))
+	if (WARN_ON(aid > SLSI_PEER_INDEX_MAX))
 		return;
 
-	peer = slsi_get_peer_from_qs(sdev, dev, peer_index - 1);
-	if (WARN(!peer, "Peer(peer_index:%d) Not Found", peer_index))
+	peer = slsi_get_peer_from_qs(sdev, dev, aid - 1);
+	if (WARN(!peer, "Peer(aid:%d) Not Found", aid))
 		return;
 
 	slsi_ps_port_control(sdev, dev, peer, SLSI_STA_CONN_STATE_CONNECTED);
@@ -581,8 +581,11 @@ static void slsi_fw_test_disconnect_station(struct slsi_dev *sdev, struct net_de
 		return;
 
 	netif_carrier_off(dev);
-	if (peer)
+	if (peer) {
+		slsi_spinlock_lock(&ndev_vif->peer_lock);
 		slsi_peer_remove(sdev, dev, peer);
+		slsi_spinlock_unlock(&ndev_vif->peer_lock);
+	}
 	slsi_vif_deactivated(sdev, dev);
 }
 
@@ -603,8 +606,11 @@ static void slsi_fw_test_disconnect_network(struct slsi_dev *sdev, struct net_de
 
 	SLSI_NET_DBG1(dev, SLSI_FW_TEST, "Network Peer Disconnect(vif:%d)\n", ndev_vif->ifnum);
 
-	if (peer)
+	if (peer) {
+		slsi_spinlock_lock(&ndev_vif->peer_lock);
 		slsi_peer_remove(sdev, dev, peer);
+		slsi_spinlock_unlock(&ndev_vif->peer_lock);
+	}
 }
 
 static void slsi_fw_test_disconnected_ind(struct slsi_dev *sdev, struct net_device *dev, struct slsi_fw_test *fwtest, struct sk_buff *skb)
@@ -691,6 +697,7 @@ static void slsi_fw_test_tdls_event_disconnected(struct slsi_dev *sdev, struct n
 	SLSI_MUTEX_LOCK(ndev_vif->vif_mutex);
 	SLSI_NET_DBG1(dev, SLSI_MLME, "TDLS dis-connect (vif:%d, mac:%pM)\n", ndev_vif->ifnum, fapi_get_buff(skb, u.mlme_tdls_peer_ind.peer_sta_address));
 
+	slsi_spinlock_lock(&ndev_vif->peer_lock);
 	peer = slsi_get_peer_from_mac(sdev, dev, fapi_get_buff(skb, u.mlme_tdls_peer_ind.peer_sta_address));
 	if (!peer || (peer->aid == 0)) {
 		WARN_ON(!peer || (peer->aid == 0));
@@ -703,8 +710,8 @@ static void slsi_fw_test_tdls_event_disconnected(struct slsi_dev *sdev, struct n
 	/* move TDLS packets from TDLS Q to STA Q */
 	slsi_tdls_move_packets(sdev, dev, ndev_vif->peer_sta_record[SLSI_STA_PEER_QUEUESET], peer, false);
 	slsi_peer_remove(sdev, dev, peer);
-
 out:
+	slsi_spinlock_unlock(&ndev_vif->peer_lock);
 	SLSI_MUTEX_UNLOCK(ndev_vif->vif_mutex);
 }
 

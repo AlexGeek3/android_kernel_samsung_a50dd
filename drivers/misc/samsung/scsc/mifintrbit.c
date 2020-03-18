@@ -145,8 +145,15 @@ int mifintrbit_alloc_fromhost(struct mifintrbit *intr, enum scsc_mif_abs_target 
 
 	if (target == SCSC_MIF_ABS_TARGET_R4)
 		p = intr->bitmap_fromhost_r4;
+#ifdef CONFIG_SCSC_MX450_GDB_SUPPORT
+	else if (target == SCSC_MIF_ABS_TARGET_M4)
+		p = intr->bitmap_fromhost_r4;
+	else if (target == SCSC_MIF_ABS_TARGET_M4_1)
+		p = intr->bitmap_fromhost_r4;
+#else
 	else if (target == SCSC_MIF_ABS_TARGET_M4)
 		p = intr->bitmap_fromhost_m4;
+#endif
 	else
 		goto error;
 
@@ -181,8 +188,15 @@ int mifintrbit_free_fromhost(struct mifintrbit *intr, int which_bit, enum scsc_m
 
 	if (target == SCSC_MIF_ABS_TARGET_R4)
 		p = intr->bitmap_fromhost_r4;
+#ifdef CONFIG_SCSC_MX450_GDB_SUPPORT
+	else if (target == SCSC_MIF_ABS_TARGET_M4)
+		p = intr->bitmap_fromhost_r4;
+	else if (target == SCSC_MIF_ABS_TARGET_M4_1)
+		p = intr->bitmap_fromhost_r4;
+#else
 	else if (target == SCSC_MIF_ABS_TARGET_M4)
 		p = intr->bitmap_fromhost_m4;
+#endif
 	else
 		goto error;
 
@@ -234,7 +248,12 @@ void mifintrbit_init(struct mifintrbit *intr, struct scsc_mif_abs *mif)
 	 * either MX manager or GDB monitor channels.
 	 */
 	set_bit(MIFINTRBIT_RESERVED_PANIC_R4, intr->bitmap_fromhost_r4);
+#ifdef CONFIG_SCSC_MX450_GDB_SUPPORT
 	set_bit(MIFINTRBIT_RESERVED_PANIC_M4, intr->bitmap_fromhost_m4);
+	set_bit(MIFINTRBIT_RESERVED_PANIC_M4_1, intr->bitmap_fromhost_m4_1);
+#else
+	set_bit(MIFINTRBIT_RESERVED_PANIC_M4, intr->bitmap_fromhost_m4);
+#endif
 
 	/* register isr with mif abstraction */
 	mif->irq_reg_handler(mif, mifiintrman_isr, (void *)intr);

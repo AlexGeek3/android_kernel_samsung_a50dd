@@ -1037,6 +1037,7 @@ static struct inode *ext4_alloc_inode(struct super_block *sb)
 
 	ei->vfs_inode.i_version = 1;
 	spin_lock_init(&ei->i_raw_lock);
+	spin_lock_init(&ei->i_file_acl_debug_lock);
 	INIT_LIST_HEAD(&ei->i_prealloc_list);
 	spin_lock_init(&ei->i_prealloc_lock);
 	ext4_es_init_tree(&ei->i_es_tree);
@@ -1297,14 +1298,15 @@ retry:
 	return res;
 }
 
-#ifdef CONFIG_DDAR
+#if defined(CONFIG_DDAR) || defined(CONFIG_FSCRYPT_SDP)
 static inline int ext4_get_knox_context(struct inode *inode,
 		const char *name, void *buffer, size_t buffer_size) {
 	return ext4_xattr_get(inode, EXT4_XATTR_INDEX_ENCRYPTION,	name, buffer, buffer_size);
 }
 static inline int ext4_set_knox_context(struct inode *inode,
-		const char *name, const void *value, size_t size) {
-	return ext4_xattr_set(inode, EXT4_XATTR_INDEX_ENCRYPTION, name, value, size, 0);
+		const char *name, const void *value, size_t size, void *fs_data) {
+	return ext4_xattr_set(inode, EXT4_XATTR_INDEX_ENCRYPTION,
+			name ? name : EXT4_XATTR_NAME_ENCRYPTION_CONTEXT, value, size, 0);
 }
 #endif
 
@@ -1317,7 +1319,7 @@ static const struct fscrypt_operations ext4_cryptops = {
 	.key_prefix		= "ext4:",
 	.get_context		= ext4_get_context,
 	.set_context		= ext4_set_context,
-#ifdef CONFIG_DDAR
+#if defined(CONFIG_DDAR) || defined(CONFIG_FSCRYPT_SDP)
 	.get_knox_context	= ext4_get_knox_context,
 	.set_knox_context	= ext4_set_knox_context,
 #endif

@@ -440,7 +440,11 @@ void dbg_snapshot_panic_handler_safe(void)
 
 	dbg_snapshot_report_reason(DSS_SIGN_SAFE_FAULT);
 	dbg_snapshot_dump_panic(text, len);
+#ifdef CONFIG_SEC_DEBUG
+	dss_soc_ops->soc_expire_watchdog((void *)_RET_IP_);
+#else
 	dss_soc_ops->soc_expire_watchdog((void *)NULL);
+#endif
 }
 
 void dbg_snapshot_register_soc_ops(struct dbg_snapshot_helper_ops *ops)

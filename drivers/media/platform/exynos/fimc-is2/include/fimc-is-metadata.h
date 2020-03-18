@@ -44,13 +44,20 @@ struct rational {
 #define CAMERA2_MAX_AVAILABLE_MODE		21
 #define CAMERA2_MAX_FACES			16
 #define CAMERA2_MAX_VENDER_LENGTH		400
+#define CAMERA2_AWB_VENDER_LENGTH		400
+#if defined(USE_DEBUG_LIBRARY_VER)
+#define CAMERA2_MAX_IPC_VENDER_LENGTH		1086
+#else
 #define CAMERA2_MAX_IPC_VENDER_LENGTH		1056
+#endif
 #define CAMERA2_MAX_PDAF_MULTIROI_COLUMN	13
 #define CAMERA2_MAX_PDAF_MULTIROI_ROW		9
 #define CAMERA2_MAX_UCTL_VENDER_LENGTH		32
 
 #define CAMERA2_MAX_UCTL_VENDOR2_LENGTH		400
 #define CAMERA2_MAX_UDM_VENDOR2_LENGTH		32
+
+#define CAMERA2_MAX_STRIPE_REGION_NUM		5
 
 #define OPEN_MAGIC_NUMBER		0x01020304
 #define SHOT_MAGIC_NUMBER		0x23456789
@@ -737,6 +744,9 @@ enum aa_capture_intent {
 	AA_CAPTURE_INTENT_STILL_CAPTURE_NORMAL_FLASH,
 	AA_CAPTURE_INTENT_STILL_CAPTURE_REMOSAIC_SINGLE,
 	AA_CAPTURE_INTENT_STILL_CAPTURE_REMOSAIC_MFHDR_DYNAMIC_SHOT,
+	AA_CAPTURE_INTENT_STILL_CAPTURE_LLHDR_VEHDR_DYNAMIC_SHOT,
+	AA_CAPTURE_INTENT_STILL_CAPTURE_VENR_DYNAMIC_SHOT,
+	AA_CAPTURE_INTENT_STILL_CAPTURE_LLS_FLASH,
 };
 
 enum aa_mode {
@@ -808,6 +818,7 @@ enum aa_scene_mode {
 	AA_SCENE_MODE_FAST_AE          = 136,
 	AA_SCENE_MODE_ILLUMINANCE      = 137,
 	AA_SCENE_MODE_SUPER_NIGHT      = 138,
+	AA_SCENE_MODE_BOKEH_VIDEO      = 139,
 };
 
 enum aa_effect_mode {
@@ -1064,6 +1075,13 @@ enum aa_af_scene_change {
 	AA_AF_DETECTED,
 };
 
+enum aa_enable_dynamicshot {
+    AA_DYNAMICSHOT_SIMPLE = 0,
+    AA_DYNAMICSHOT_FULL,
+    AA_DYNAMICSHOT_HDR_ONLY,
+    AA_DYNAMICSHOT_LLS_ONLY,
+};
+
 struct camera2_aa_ctl {
 	enum aa_ae_antibanding_mode	aeAntibandingMode;
 	int32_t				aeExpCompensation;
@@ -1103,7 +1121,7 @@ struct camera2_aa_ctl {
 	uint32_t			vendor_captureExposureTime;
 	float				vendor_objectDistanceCm;
 	int32_t				vendor_colorTempKelvin;
-	int32_t				vendor_enableDynamicShotDm;
+	enum aa_enable_dynamicshot	vendor_enableDynamicShotDm;
 	float				vendor_expBracketing[15];
 	float				vendor_expBracketingCapture;
 	enum aa_supernightmode		vendor_superNightShotMode;
@@ -1192,7 +1210,9 @@ struct camera2_aa_dm {
 	uint32_t			vendor_luxIndex;
 	uint32_t			vendor_luxStandard;
 	int32_t				vendor_multiFrameEv;
-	uint32_t			vendor_reserved[4];
+	int32_t				vendor_faceToneWeight;
+	float				vendor_noiseIndex;
+	uint32_t			vendor_reserved[2];
 
 	// For dual
 	uint32_t			vendor_wideTeleConvEv;
@@ -1538,7 +1558,7 @@ struct camera2_ae_udm {
 
 struct camera2_awb_udm {
 	uint32_t	vsLength;
-	uint32_t	vendorSpecific[CAMERA2_MAX_VENDER_LENGTH];
+	uint32_t	vendorSpecific[CAMERA2_AWB_VENDER_LENGTH];
 
 	/** vendor specific2 length */
 	uint32_t	vs2Length;
@@ -1959,6 +1979,12 @@ enum camera_client_index {
 	CAMERA_APP_CATEGORY_MAX
 };
 
+enum remosaic_oper_mode {
+	REMOSAIC_OPER_MODE_NONE = 0,
+	REMOSAIC_OPER_MODE_SINGLE = 1,
+	REMOSAIC_OPER_MODE_MFHDR = 2,
+};
+
 /** \brief
   User-defined control area.
   \remarks
@@ -2190,6 +2216,14 @@ struct camera2_stream {
 	 */
 	uint32_t		input_crop_region[4];
 	uint32_t		output_crop_region[4];
+
+#ifdef CHAIN_USE_STRIPE_PROCESSING
+	/**
+	  stripe region horizontal pixel nums
+	  this value indicates each width pixel size of stripe region
+	 */
+	uint32_t		stripe_h_pix_nums[CAMERA2_MAX_STRIPE_REGION_NUM];
+#endif
 };
 
 /** \brief

@@ -199,6 +199,9 @@ int asv_table_init(void)
 	pr_info("  cam_disp grp : %d\n", asv_tbl->cam_disp_asv_group);
 	pr_info("  cp grp : %d\n", asv_tbl->cp_asv_group);
 	pr_info("  fsys grp : %d\n", asv_tbl->fsys_asv_group);
+	pr_info("  bigcpu ids : %d\n", id_tbl->ids_big);
+	pr_info("  g3d ids : %d\n", id_tbl->ids_g3d);
+	pr_info("  others ids : %d\n", id_tbl->ids_others);
 
 	return asv_tbl->asv_table_version;
 }

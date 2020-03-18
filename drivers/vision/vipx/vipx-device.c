@@ -438,10 +438,6 @@ static struct platform_driver vipx_driver = {
 	}
 };
 
-// TODO temp code
-extern int __init vertex_device_init(void);
-extern void __exit vertex_device_exit(void);
-
 static int __init vipx_device_init(void)
 {
 	int ret;
@@ -452,8 +448,6 @@ static int __init vipx_device_init(void)
 		vipx_err("platform driver for vipx is not registered(%d)\n",
 				ret);
 
-	vertex_device_init();
-
 	vipx_leave();
 	return ret;
 }
@@ -461,7 +455,6 @@ static int __init vipx_device_init(void)
 static void __exit vipx_device_exit(void)
 {
 	vipx_enter();
-	vertex_device_exit();
 	platform_driver_unregister(&vipx_driver);
 	vipx_leave();
 }

@@ -32,8 +32,8 @@
 #include <linux/input/tui_hal_ts.h>
 #include <linux/t-base-tui.h>
 #endif
-#ifdef CONFIG_SEC_SYSFS
-#include <linux/sec_sysfs.h>
+#ifdef CONFIG_DRV_SAMSUNG
+#include <linux/sec_class.h>
 #endif
 #include "../../../i2c/busses/i2c-exynos5.h"
 
@@ -1588,7 +1588,7 @@ static int sec_ts_raw_device_init(struct sec_ts_data *ts)
 {
 	int ret;
 
-#ifdef CONFIG_SEC_SYSFS
+#ifdef CONFIG_DRV_SAMSUNG
 	ts->dev = sec_device_create(ts, "sec_ts");
 #else
 	ts->dev = device_create(sec_class, NULL, 0, ts, "sec_ts");

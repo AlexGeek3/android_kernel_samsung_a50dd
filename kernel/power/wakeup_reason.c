@@ -67,6 +67,18 @@ static ssize_t last_resume_reason_show(struct kobject *kobj, struct kobj_attribu
 						irq_list[irq_no]);
 		}
 	}
+
+#ifdef CONFIG_SEC_PM_DEBUG
+	if (!suspend_abort && wakeup_src_by_name) {
+		int i;
+		for (i = 0; i < wakeup_src_cnt; i++) {
+			/* XXX: 999 is dummy irq number for batterystats*/
+			buf_offset += sprintf(buf + buf_offset, "999 %s\n",
+					wakeup_src_list[i]);
+		}
+	}
+#endif /* CONFIG_SEC_PM_DEBUG */
+
 	spin_unlock(&resume_reason_lock);
 	return buf_offset;
 }
@@ -147,7 +159,7 @@ void log_wakeup_reason_name(const char *name)
 		spin_unlock(&resume_reason_lock);
 		printk(KERN_WARNING
 			"Resume caused by more than %d wakeup sources\n",
-			MAX_WAKEUP_REASON_IRQS);
+			MAX_WAKEUP_SRCS);
 		return;
 	}
 
@@ -200,6 +212,10 @@ static int wakeup_reason_pm_event(struct notifier_block *notifier,
 		spin_lock(&resume_reason_lock);
 		irqcount = 0;
 		suspend_abort = false;
+#ifdef CONFIG_SEC_PM_DEBUG
+		wakeup_src_cnt = 0;
+		wakeup_src_by_name = false;
+#endif /* CONFIG_SEC_PM_DEBUG */
 		spin_unlock(&resume_reason_lock);
 		/* monotonic time since boot */
 		last_monotime = ktime_get();
@@ -249,4 +265,4 @@ int __init wakeup_reason_init(void)
 	return 0;
 }
 
-late_initcall(wakeup_reason_init);
+subsys_initcall(wakeup_reason_init);

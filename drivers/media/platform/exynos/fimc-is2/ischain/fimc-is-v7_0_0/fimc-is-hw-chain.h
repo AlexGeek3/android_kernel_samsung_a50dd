@@ -156,6 +156,8 @@ enum sysreg_isphq_reg_field {
 
 #define FIMC_IS_RESERVE_LIB_SIZE	(0x00600000)	/* 6MB */
 #define FIMC_IS_TAAISP_SIZE		(0x00600000)	/* 6MB */
+/* ME/DRC DMA: 4.125MB */
+#define TAAISP_MEDRC_SIZE		(0x00420000)
 #define FIMC_IS_VRA_SIZE		(0x00800000)	/* 8MB */
 
 #define FIMC_IS_HEAP_SIZE		(0x02800000)	/* 40MB */

@@ -156,6 +156,7 @@ typedef struct _CMCS_BUF {
 	u32 cs_rx_result[2];
 	u32 slope_tx_result[2];
 	u32 slope_rx_result[2];
+	u32 cm_slope_result[2];
 	int cm_result;
 	int cs_result;
 	int cm_jit_result;

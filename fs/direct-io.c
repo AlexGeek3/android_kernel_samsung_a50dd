@@ -453,12 +453,15 @@ static inline void dio_bio_submit(struct dio *dio, struct dio_submit *sdio)
 
 #if defined(CONFIG_FS_INLINE_ENCRYPTION)
 	if (fscrypt_inline_encrypted(dio->inode)) {
-		fscrypt_set_bio_cryptd(dio->inode, bio);
+		fscrypt_set_bio_cryptd_dun(dio->inode, bio,
+				fscrypt_get_dun(dio->inode,
+				(sdio->logical_offset_in_bio >> PAGE_SHIFT)));
 #if defined(CONFIG_CRYPTO_DISKCIPHER_DEBUG)
 		crypto_diskcipher_debug(FS_DIO, bio->bi_opf);
 #endif
 	}
 #endif
+
 	if (dio->is_async && dio->op == REQ_OP_READ && dio->should_dirty)
 		bio_set_pages_dirty(bio);
 

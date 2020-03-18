@@ -242,7 +242,6 @@ static void etspi_power_control(struct etspi_data *etspi, int status)
 		if (etspi->drdyPin)
 			gpio_direction_output(etspi->drdyPin, 0);
 		etspi_pin_control(etspi, true);
-		usleep_range(10000, 10050);
 	} else if (status == 0) {
 		etspi_pin_control(etspi, false);
 #if defined(ENABLE_SENSORS_FPRINT_SECURE) && !defined(DISABLED_GPIO_PROTECTION)
@@ -1199,6 +1198,7 @@ static int etspi_type_check(struct etspi_data *etspi)
 	 * type check return value
 	 * ET711A : 0x07 / 0x1D or 0x07 / 0x0B
 	 * ET713A : 0x07 / 0x0D
+	 * ET715  : 0x07 / 0x0F
 	 */
 	if ((buf1 == 0x07) && ((buf2 == 0x1D) || (buf2 == 0x0B))) {
 		etspi->sensortype = SENSOR_EGIS;
@@ -1206,6 +1206,9 @@ static int etspi_type_check(struct etspi_data *etspi)
 	} else if ((buf1 == 0x07) && (buf2 == 0x0D)) {
 		etspi->sensortype = SENSOR_EGIS;
 		pr_info("%s sensor type is EGIS ET713A sensor\n", __func__);
+	} else if ((buf1 == 0x07) && (buf2 == 0x0F)) {
+		etspi->sensortype = SENSOR_EGIS;
+		pr_info("%s sensor type is EGIS ET715 sensor\n", __func__);
 	} else {
 		etspi->sensortype = SENSOR_FAILED;
 		pr_info("%s sensor type is FAILED\n", __func__);

@@ -25,7 +25,9 @@
 #include <linux/netdevice.h>
 #endif
 #ifndef SLSI_TEST_DEV
+#ifdef CONFIG_ANDROID
 #include <linux/wakelock.h>
+#endif
 #endif
 #include "mbulk.h"
 #ifdef CONFIG_SCSC_SMAPPER
@@ -290,9 +292,6 @@ struct hip4_priv {
 	/* Wakelock for modem_ctl */
 	struct wake_lock             hip4_wake_lock;
 #endif
-
-	/* Control the hip4 init */
-	atomic_t                     rx_ready;
 
 	/* Control the hip4 deinit */
 	atomic_t                     closing;

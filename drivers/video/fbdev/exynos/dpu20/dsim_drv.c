@@ -45,8 +45,8 @@
 #include "../../../../../mm/internal.h"
 
 #include "decon_board.h"
-#include "panels/dsim_panel.h"
 #include "panels/dd.h"
+#include "panels/dsim_panel.h"
 
 #include "decon.h"
 #include "dsim.h"
@@ -467,7 +467,7 @@ static void dsim_underrun_info(struct dsim_device *dsim)
 					decon->bts.peak);
 			dsim_bts_print_info(&decon->bts.bts_info);
 
-			decon_abd_save_log_udr(&decon->abd, mif, iint, disp);
+			decon_abd_save_udr(&decon->abd, mif, iint, disp);
 		}
 	}
 #endif
@@ -595,7 +595,7 @@ static int dsim_get_regulator(struct dsim_device *dsim)
 	res->regulator_1p8v = NULL;
 	res->regulator_3p3v = NULL;
 
-	if(!of_property_read_string(dev->of_node, "regulator_1p8v",
+	if (!of_property_read_string(dev->of_node, "regulator_1p8v",
 				(const char **)&str_regulator_1p8v)) {
 		res->regulator_1p8v = regulator_get(dev, str_regulator_1p8v);
 		if (IS_ERR(res->regulator_1p8v)) {
@@ -604,7 +604,7 @@ static int dsim_get_regulator(struct dsim_device *dsim)
 		}
 	}
 
-	if(!of_property_read_string(dev->of_node, "regulator_3p3v",
+	if (!of_property_read_string(dev->of_node, "regulator_3p3v",
 				(const char **)&str_regulator_3p3v)) {
 		res->regulator_3p3v = regulator_get(dev, str_regulator_3p3v);
 		if (IS_ERR(res->regulator_3p3v)) {
@@ -625,24 +625,36 @@ int dsim_reset_panel(struct dsim_device *dsim)
 
 	run_list(dsim->dev, __func__);
 
-	if (res->lcd_reset > 0) {
-		ret = gpio_request_one(res->lcd_reset, GPIOF_OUT_INIT_HIGH, "lcd_reset");
-		if (ret < 0) {
-			dsim_err("failed to get LCD reset GPIO\n");
-			return -EINVAL;
-		}
+	if (res->lcd_reset <= 0)
+		return 0;
 
-		usleep_range(5000, 6000);
-		gpio_set_value(res->lcd_reset, 0);
-		usleep_range(5000, 6000);
-		gpio_set_value(res->lcd_reset, 1);
-
-		gpio_free(res->lcd_reset);
-
-		usleep_range(10000, 11000);
+	ret = gpio_request_one(res->lcd_reset, GPIOF_OUT_INIT_HIGH, "lcd_reset");
+	if (ret < 0) {
+		dsim_err("failed to get LCD reset GPIO\n");
+		return -EINVAL;
 	}
 
+	usleep_range(5000, 6000);
+	gpio_set_value(res->lcd_reset, 0);
+	usleep_range(5000, 6000);
+	gpio_set_value(res->lcd_reset, 1);
+
+	gpio_free(res->lcd_reset);
+
+	usleep_range(10000, 11000);
+
 	dsim_dbg("%s -\n", __func__);
+	return 0;
+}
+
+int dsim_set_panel_power_early(struct dsim_device *dsim)
+{
+	dsim_info("%s +\n", __func__);
+
+	run_list(dsim->dev, __func__);
+
+	dsim_info("%s -\n", __func__);
+
 	return 0;
 }
 
@@ -1272,7 +1284,7 @@ static ssize_t dsim_cmd_sysfs_store(struct device *dev,
 		if (ret)
 			return ret;
 		break;
-	default :
+	default:
 		dsim_info("unsupportable command\n");
 		break;
 	}
@@ -1538,6 +1550,31 @@ static int dsim_parse_dt(struct dsim_device *dsim, struct device *dev)
 	return 0;
 }
 
+static void dsim_register_panel(struct dsim_device *dsim)
+{
+#if IS_ENABLED(CONFIG_EXYNOS_DECON_LCD_S6E3HA2K)
+	dsim->panel_ops = &s6e3ha2k_mipi_lcd_driver;
+#elif IS_ENABLED(CONFIG_EXYNOS_DECON_LCD_S6E3HF4)
+	dsim->panel_ops = &s6e3hf4_mipi_lcd_driver;
+#elif IS_ENABLED(CONFIG_EXYNOS_DECON_LCD_S6E3HA6)
+	dsim->panel_ops = &s6e3ha6_mipi_lcd_driver;
+#elif IS_ENABLED(CONFIG_EXYNOS_DECON_LCD_S6E3HA8)
+	dsim->panel_ops = &s6e3ha8_mipi_lcd_driver;
+#elif IS_ENABLED(CONFIG_EXYNOS_DECON_LCD_S6E3AA2)
+	dsim->panel_ops = &s6e3aa2_mipi_lcd_driver;
+#elif IS_ENABLED(CONFIG_EXYNOS_DECON_LCD_S6E3FA0)
+	dsim->panel_ops = &s6e3fa0_mipi_lcd_driver;
+#elif IS_ENABLED(CONFIG_EXYNOS_DECON_LCD_S6E3FA7)
+	dsim->panel_ops = &s6e3fa7_mipi_lcd_driver;
+#elif IS_ENABLED(CONFIG_EXYNOS_DECON_LCD_EA8076)
+	dsim->panel_ops = &ea8076_mipi_lcd_driver;
+#elif IS_ENABLED(CONFIG_EXYNOS_DECON_LCD_EMUL_DISP)
+	dsim->panel_ops = &emul_disp_mipi_lcd_driver;
+#else
+	dsim->panel_ops = mipi_lcd_driver;
+#endif
+}
+
 static int dsim_get_data_lanes(struct dsim_device *dsim)
 {
 	int i;
@@ -1673,7 +1710,7 @@ static int dsim_probe(struct platform_device *pdev)
 	dsim_info("dsim idle_ip_index[%d]\n", dsim->idle_ip_index);
 	if (dsim->idle_ip_index < 0)
 		dsim_warn("idle ip index is not provided for dsim\n");
-	exynos_update_ip_idle_status(dsim->idle_ip_index, 1);
+	exynos_update_ip_idle_status(dsim->idle_ip_index, 0);
 #endif
 
 	if (dsim->lcd_info.mode == DECON_VIDEO_MODE)
@@ -1751,21 +1788,11 @@ static void dsim_shutdown(struct platform_device *pdev)
 {
 #if 0
 	struct dsim_device *dsim = platform_get_drvdata(pdev);
-	struct decon_device *decon = get_decon_drvdata(0);
-	struct fb_info *fbinfo = decon->win[decon->dt.dft_win]->fbinfo;
 
 	DPU_EVENT_LOG(DPU_EVT_DSIM_SHUTDOWN, &dsim->sd, ktime_set(0, 0));
 	dsim_info("%s + state:%d\n", __func__, dsim->state);
 
-	if (!lock_fb_info(fbinfo)) {
-		dsim_warn("%s: fblock is failed\n", __func__);
-		return;
-	}
-
-	decon->ignore_vsync = 1;
-	wake_up_interruptible_all(&decon->vsync.wait);
 	dsim_disable(dsim);
-	unlock_fb_info(fbinfo);
 #endif
 	dsim_info("%s -\n", __func__);
 }

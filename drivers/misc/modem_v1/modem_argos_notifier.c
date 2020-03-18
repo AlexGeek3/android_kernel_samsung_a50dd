@@ -62,11 +62,11 @@ unsigned int big_clat_rps = 0x20;
 module_param(big_clat_rps, uint, S_IRUGO | S_IWUSR | S_IWGRP);
 MODULE_PARM_DESC(big_clat_rps, "rps_cpus for v4-rmnetx: BIG(both up)");
 
-unsigned int mif_rps_thresh = 200;
+unsigned int mif_rps_thresh = 150;
 module_param(mif_rps_thresh, uint, S_IRUGO | S_IWUSR | S_IWGRP);
 MODULE_PARM_DESC(mif_rps_thresh, "threshold speed");
 
-int mif_gro_flush_thresh[] = {100, 200, -1};
+int mif_gro_flush_thresh[] = {50, 100, -1};
 long mif_gro_flush_time[] = {0, 10000, 100000};
 
 static int mif_store_rps_map(struct netdev_rx_queue *queue, char *buf, size_t len)

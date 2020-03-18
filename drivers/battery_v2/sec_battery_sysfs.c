@@ -201,6 +201,7 @@ static struct device_attribute sec_battery_attrs[] = {
 #endif
 	SEC_BATTERY_ATTR(wc_duo_rx_power),
 	SEC_BATTERY_ATTR(ext_event),
+	SEC_BATTERY_ATTR(direct_charging_status),
 	SEC_BATTERY_ATTR(factory_mode_relieve),
 	SEC_BATTERY_ATTR(factory_mode_bypass),
 	SEC_BATTERY_ATTR(normal_mode_bypass),
@@ -529,16 +530,21 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 	case HV_CHARGER_STATUS:
 		{
 			int check_val = 0;
-			if (is_hv_wire_12v_type(battery->cable_type) ||
-				battery->max_charge_power >= HV_CHARGER_STATUS_STANDARD2) /* 20000mW */
+
+			if (is_hv_wire_12v_type(battery->cable_type)) {
 				check_val = 2;
-			else if (is_hv_wire_type(battery->cable_type) ||
-				(battery->cable_type == SEC_BATTERY_CABLE_PDIC &&
-				battery->pd_max_charge_power >= HV_CHARGER_STATUS_STANDARD1 &&
-				battery->pdic_info.sink_status.available_pdo_num > 1) ||
-				battery->wire_status == SEC_BATTERY_CABLE_PREPARE_TA ||
-				battery->max_charge_power >= HV_CHARGER_STATUS_STANDARD1) /* 12000mW */
+			} else if (is_hv_wire_type(battery->cable_type) ||
+				battery->wire_status == SEC_BATTERY_CABLE_PREPARE_TA) {
 				check_val = 1;
+			} else if (is_pd_wire_type(battery->cable_type)) {
+				if (battery->pd_max_charge_power >= HV_CHARGER_STATUS_STANDARD1 &&
+					battery->pdic_info.sink_status.available_pdo_num > 1)
+					check_val = 1;
+			} else if (battery->max_charge_power >= HV_CHARGER_STATUS_STANDARD2) {
+				check_val = 2;
+			} else if (battery->max_charge_power >= HV_CHARGER_STATUS_STANDARD1) {
+				check_val = 1;
+			}
 
 			i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", check_val);
 		}
@@ -1349,6 +1355,10 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 		break;
 	case EXT_EVENT:
 		break;
+ 	case DIRECT_CHARGING_STATUS:
+		ret = -1; /* DC not supported model returns -1 */
+		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", ret);
+		break; 
 	case FACTORY_MODE_RELIEVE:
 		break;
 	case FACTORY_MODE_BYPASS:
@@ -1498,7 +1508,11 @@ ssize_t sec_bat_store_attrs(
 			} else {
 				battery->siop_level = 100;
 			}
-
+#if defined(CONFIG_SUPPORT_HV_CTRL)
+			/* clear skip heating control for sec_bat_change_vbus_pd */
+			if (battery->cable_type == SEC_BATTERY_CABLE_PDIC)
+				sec_bat_set_current_event(battery, 0, SEC_BAT_CURRENT_EVENT_SKIP_HEATING_CONTROL);
+#endif
 			wake_lock(&battery->siop_level_wake_lock);
 			queue_delayed_work(battery->monitor_wqueue, &battery->siop_level_work, 0);
 
@@ -1537,6 +1551,13 @@ ssize_t sec_bat_store_attrs(
 	case FG_CAPACITY:
 		break;
 	case FG_ASOC:
+		if (sscanf(buf, "%d\n", &x) == 1) {
+			if (x >= 0 && x <= 100) {
+				battery->batt_asoc = x;
+				sec_bat_check_battery_health(battery);
+			}
+			ret = count;
+		}
 		break;
 	case AUTH:
 		break;
@@ -1993,6 +2014,7 @@ ssize_t sec_bat_store_attrs(
 						"%s: [Long life] Do sec_bat_aging_check()\n", __func__);
 					sec_bat_aging_check(battery);
 				}
+				sec_bat_check_battery_health(battery);
 			}
 			ret = count;
 		}

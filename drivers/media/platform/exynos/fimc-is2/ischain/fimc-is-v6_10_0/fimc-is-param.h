@@ -64,6 +64,7 @@ enum is_param {
 	PARAM_3AA_FDDMA_OUTPUT,
 	PARAM_3AA_MRGDMA_OUTPUT,
 	PARAM_3AA_DDMA_OUTPUT,
+	PARAM_3AA_STRIPE_INPUT,
 	PARAM_ISP_CONTROL,
 	PARAM_ISP_OTF_INPUT,
 	PARAM_ISP_VDMA1_INPUT,
@@ -71,6 +72,7 @@ enum is_param {
 	PARAM_ISP_OTF_OUTPUT,
 	PARAM_ISP_VDMA4_OUTPUT,
 	PARAM_ISP_VDMA5_OUTPUT,
+	PARAM_ISP_STRIPE_INPUT,
 	PARAM_TPU_CONTROL,
 	PARAM_TPU_CONFIG,
 	PARAM_TPU_OTF_INPUT,
@@ -802,6 +804,16 @@ struct param_dma_input {
 	u32	err;
 };
 
+struct param_stripe_input {
+	u32	index;		/* Stripe region index */
+	u32	total_count;	/* Total stripe region num */
+	u32	overlap_width;	/* Overlapped horizontal region */
+	u32	full_width;	/* Original image width */
+	u32	full_height;	/* Original image height */
+	u32	reserved[PARAMETER_MAX_MEMBER - 6];
+	u32	error;		/* Error code */
+};
+
 struct param_otf_output {
 	u32	cmd;
 	u32	format;
@@ -832,11 +844,14 @@ struct param_dma_output {
 	u32	dma_crop_height;
 	u32	crop_enable; /* 0: use crop before bds, 1: use crop after bds */
 	u32	msb; /* last bit of data in memory size */
+	u32	stride_plane0;
+	u32	stripe_plane1;
+	u32	stripe_plane2;
 	u32	v_otf_enable;
 	u32	v_otf_dst_ip; /* ISPLP:0, ISPHQ:1, DCP:2, CIP1:4, CIP2:3 */
 	u32	v_otf_dst_axi_id;
 	u32	v_otf_token_line;
-	u32	reserved[PARAMETER_MAX_MEMBER-18];
+	u32	reserved[PARAMETER_MAX_MEMBER-21];
 	u32	err;
 };
 
@@ -1098,6 +1113,7 @@ struct taa_param {
 	struct param_dma_output		efd_output;		/* Early FD */
 	struct param_dma_output		mrg_output;		/* mrg_out*/
 	struct param_dma_output		ddma_output;	/* not use */
+	struct param_stripe_input	stripe_input;
 };
 
 struct isp_param {
@@ -1108,6 +1124,7 @@ struct isp_param {
 	struct param_otf_output		otf_output;	/* otf_out */
 	struct param_dma_output		vdma4_output;	/* pdma : chunk output */
 	struct param_dma_output		vdma5_output;	/* cdma : yuv output */
+	struct param_stripe_input	stripe_input;
 };
 
 struct drc_param {

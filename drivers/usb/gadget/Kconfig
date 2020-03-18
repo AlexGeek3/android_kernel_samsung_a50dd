@@ -274,6 +274,9 @@ config USB_F_AUDIO_SRC
 config USB_F_ACC
 	tristate
 
+config USB_F_CONN_GADGET
+	tristate
+
 # this first set of drivers all depend on bulk-capable hardware.
 
 config USB_CONFIGFS
@@ -454,6 +457,20 @@ config USB_CONFIGFS_F_PTP
 	select USB_F_PTP
 	help
 	  USB gadget PTP support
+
+config USB_CONFIGFS_F_CONN_GADGET
+        bool "Conn gadget function"
+        depends on USB_CONFIGFS
+        select USB_F_CONN_GADGET
+        help
+          SideSync
+
+config USB_F_CONN_GADGET_NDOP
+    bool "Conn gadget that do not support DexLive"
+    depends on USB_CONFIGFS_F_CONN_GADGET
+	depends on ANDROID_MAJOR_VERSION >= "q"
+    help
+		Next SideSync
 
 config USB_CONFIGFS_F_ACC
 	boolean "Accessory gadget"

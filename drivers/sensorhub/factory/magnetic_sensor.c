@@ -12,6 +12,7 @@
  *  GNU General Public License for more details.
  *
  */
+#include <linux/slab.h>
 #include "../ssp.h"
 #include "../sensors_core.h"
 #include "../ssp_data.h"
@@ -198,6 +199,9 @@ void select_magnetic_ops(struct ssp_data *data)
 #if defined(CONFIG_SENSORS_SSP_MAGNETIC_AK09918C)
 	count++;
 #endif
+#if defined(CONFIG_SENSORS_SSP_MAGNETIC_MMC5603)
+	count++;
+#endif
 #if defined(CONFIG_SENSORS_SSP_MAGNETIC_AK09916C)
 	count++;
 #endif
@@ -222,6 +226,9 @@ void select_magnetic_ops(struct ssp_data *data)
 #if defined(CONFIG_SENSORS_SSP_MAGNETIC_AK09918C)
 	mag_ops_ary[i++] = get_magnetic_ak09918c_function_pointer(data);
 #endif
+#if defined(CONFIG_SENSORS_SSP_MAGNETIC_MMC5603)
+	mag_ops_ary[i++] = get_magnetic_mmc5603_function_pointer(data);
+#endif	
 #if defined(CONFIG_SENSORS_SSP_MAGNETIC_AK09916C)
 	mag_ops_ary[i++] = get_magnetic_ak09916c_function_pointer(data);
 #endif
@@ -268,6 +275,8 @@ void initialize_magnetic_factorytest(struct ssp_data *data)
 {
 #if defined(CONFIG_SENSORS_SSP_MAGNETIC_AK09918C)
 	data->magnetic_ops = get_magnetic_ak09918c_function_pointer(data);
+#elif defined(CONFIG_SENSORS_SSP_MAGNETIC_MMC5603)
+	data->magnetic_ops = get_magnetic_mmc5603_function_pointer(data);
 #elif defined(CONFIG_SENSORS_SSP_MAGNETIC_AK09916C)
 	data->magnetic_ops = get_magnetic_ak09916c_function_pointer(data);
 #elif defined(CONFIG_SENSORS_SSP_MAGNETIC_AK09911)

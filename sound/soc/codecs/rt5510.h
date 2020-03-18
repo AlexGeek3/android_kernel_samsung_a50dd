@@ -20,12 +20,19 @@
 #include <linux/mutex.h>
 #include <linux/rt-regmap.h>
 
+#ifdef CONFIG_SND_RICHTEK_SPM
+#include "richtek_spm_cls.h"
+#endif /* CONFIG_SND_RICHTEK_SPM */
+
 struct rt5510_chip {
 	struct i2c_client *i2c;
 	struct device *dev;
 	struct snd_soc_codec *codec;
 	struct platform_device *param_dev;
 	struct rt_regmap_device *regmap;
+#ifdef CONFIG_SND_RICHTEK_SPM
+	struct richtek_spm_classdev richtek_spm;
+#endif /* CONFIG_SND_RICHTEK_SPM */
 	struct mutex var_lock;
 	u16 chip_rev;
 	u8 dev_cnt;

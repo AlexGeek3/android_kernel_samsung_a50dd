@@ -48,6 +48,7 @@
 #endif
 
 #include "./panels/decon_lcd.h"
+#include "decon_abd.h"
 #include "dsim.h"
 #if defined(CONFIG_EXYNOS_DISPLAYPORT)
 #include "displayport.h"
@@ -880,106 +881,13 @@ struct decon_fence {
 };
 #endif
 
-
-#define ABD_EVENT_LOG_MAX	50
-#define ABD_LOG_MAX		10
-
-struct abd_event_log {
-	u64 stamp;
-	const char *print;
-};
-
-struct abd_event {
-	struct abd_event_log log[ABD_EVENT_LOG_MAX];
-	atomic_t log_idx;
-};
-
-struct abd_log {
-	u64 stamp;
-
-	unsigned int level;
-	unsigned int state;
-	unsigned int onoff;
-
-	unsigned int winid;
-	struct dma_fence fence;
-
-	unsigned int frm_status;
-	unsigned long mif;
-	unsigned long iint;
-	unsigned long disp;
-	struct decon_bts bts;
-};
-
-struct abd_trace {
-	const char *name;
-	unsigned int count;
-	unsigned int lcdon_flag;
-	struct abd_log log[ABD_LOG_MAX];
-};
-
-struct abd_pin {
-	const char *name;
-	unsigned int irq;
-	int gpio;
-	int level;
-	int active_level;
-
-	struct abd_trace p_first;
-	struct abd_trace p_lcdon;
-	struct abd_trace p_event;
-
-	irq_handler_t	handler;
-	void		*dev_id;
-};
-
-enum {
-	ABD_PIN_PCD,
-	ABD_PIN_DET,
-	ABD_PIN_ERR,
-	ABD_PIN_CON,
-	ABD_PIN_MAX
-};
-
-struct abd_protect {
-	struct abd_pin pin[ABD_PIN_MAX];
-	struct abd_event event;
-
-	struct abd_trace f_first;
-	struct abd_trace f_lcdon;
-	struct abd_trace f_event;
-
-	struct abd_trace u_first;
-	struct abd_trace u_lcdon;
-	struct abd_trace u_event;
-
-	unsigned int irq_enable;
-	struct notifier_block reboot_notifier;
-	spinlock_t slock;
-
-	struct workqueue_struct *con_workqueue;
-	struct work_struct con_work;
-	unsigned int con_irq;
-
-	struct notifier_block fb_notifier;
-	struct fb_ops decon_fbops;
-};
-
-void decon_abd_enable(struct decon_device *decon, int enable);
-int decon_abd_register(struct decon_device *decon);
-void decon_abd_save_log_fto(struct abd_protect *abd, struct dma_fence *fence);
-void decon_abd_save_log_udr(struct abd_protect *abd, unsigned long mif, unsigned long iint, unsigned long disp);
-int decon_abd_register_pin_handler(int irq, irq_handler_t handler, void *dev_id);
-void decon_abd_save_log_event(struct abd_protect *abd, const char *print);
-
 struct decon_device {
 	int id;
 	enum decon_state state;
 
 	unsigned int ignore_vsync;
 	struct abd_protect abd;
-	atomic_t win_config;
-	atomic_t displayoff;
+	atomic_t ffu_flag;	/* first frame update */
 
 #if defined(CONFIG_SUPPORT_MASK_LAYER)
 	bool current_mask_layer;
@@ -1289,19 +1197,6 @@ static inline bool decon_min_lock_cond(struct decon_device *decon)
 	return (atomic_read(&decon->hiber.block_cnt) <= 0);
 }
 
-#ifdef CONFIG_LCD_HMT
-static inline bool is_hmd_running(struct decon_device *decon)
-{
-	struct dsim_device *dsim;
-	dsim = container_of(decon->out_sd[0], struct dsim_device, sd);
-
-	if (dsim != NULL && dsim->hmt_on)
-		return true;
-	else
-		return false;
-}
-#endif
-
 static inline bool is_cam_not_running(struct decon_device *decon)
 {
 	if (!decon->id)
@@ -1315,9 +1210,6 @@ static inline bool decon_hiber_enter_cond(struct decon_device *decon)
 		&& is_cam_not_running(decon)
 #if defined(CONFIG_EXYNOS_DISPLAYPORT)
 		&& is_displayport_not_running()
-#endif
-#ifdef CONFIG_LCD_HMT
-		&& (!is_hmd_running(decon))
 #endif
 		&& (!decon->low_persistence)
 		&& (atomic_inc_return(&decon->hiber.trig_cnt) >

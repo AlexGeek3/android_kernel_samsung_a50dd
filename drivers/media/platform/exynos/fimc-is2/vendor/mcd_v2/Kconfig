@@ -40,9 +40,33 @@ config OIS_USE_RUMBA_S4
         default n
         help
           Use RUMBA S4 ois driver IC.
-config CAMERA_A50
-        bool "This camera is a50 project"
+config CAMERA_AAS_V50
+        bool "This camera is aas_v50 project"
         depends on VENDER_MCD_V2
         default n
         help
-          This camera is a50 project.
+          This camera is aas_v50 project.
+config CAMERA_AAS_V80
+        bool "This camera is aas_v80 project"
+        depends on VENDER_MCD_V2
+        default n
+        help
+          This camera is aas_v80 project.
+config CAMERA_AAS_V50S
+        bool "This camera is aas_v50s project"
+        depends on VENDER_MCD_V2
+        default n
+        help
+          This camera is aas_v50s project.
+config CAMERA_MMS_V30S
+        bool "This camera is mms_v30s project"
+        depends on VENDER_MCD_V2
+        default n
+        help
+          This camera is mms_v30s project.
+config CAMERA_AAS_V51
+        bool "This camera is aas_v51 project"
+        depends on VENDER_MCD_V2
+        default n
+        help
+          This camera is aas_v51 project.

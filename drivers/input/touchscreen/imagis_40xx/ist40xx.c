@@ -33,6 +33,15 @@
 #include "ist40xx_update.h"
 #include "ist40xx_cmcs.h"
 
+#if defined(CONFIG_VBUS_NOTIFIER) || defined(CONFIG_MUIC_NOTIFIER)
+#include <linux/muic/muic.h>
+#include <linux/muic/muic_notifier.h>
+#include <linux/vbus_notifier.h>
+#endif
+#if defined(CONFIG_USB_TYPEC_MANAGER_NOTIFIER)
+#include <linux/usb/typec/usb_typec_manager_notifier.h>
+#endif
+
 #ifdef CONFIG_TRUSTONIC_TRUSTED_UI
 #include <linux/t-base-tui.h>
 #endif
@@ -129,6 +138,15 @@ void ist40xx_scheduled_reset(struct ist40xx_data *data)
 		return;
 	}
 #endif
+#ifdef CONFIG_INPUT_SEC_SECURE_TOUCH
+		if (atomic_read(&data->st_enabled) == SECURE_TOUCH_ENABLED) {
+			input_err(true, &data->client->dev,
+				  "%s: TSP no accessible from Linux, TUI is enabled!\n",
+				  __func__);
+			return;
+		}
+#endif
+
 	if (data->initialized)
 		schedule_delayed_work(&data->work_reset_check, 0);
 }
@@ -149,7 +167,7 @@ void ist40xx_start(struct ist40xx_data *data)
 		data->scan_count = 0;
 		data->scan_retry = 0;
 		mod_timer(&data->event_timer,
-				get_jiffies_64() + EVENT_TIMER_INTERVAL * 2);
+				get_jiffies_64() + EVENT_TIMER_INTERVAL);
 	}
 
 	data->ignore_delay = true;
@@ -222,6 +240,7 @@ int ist40xx_set_input_device(struct ist40xx_data *data)
 	set_bit(EV_ABS, data->input_dev->evbit);
 	set_bit(EV_KEY, data->input_dev->evbit);
 	set_bit(INPUT_PROP_DIRECT, data->input_dev->propbit);
+	set_bit(KEY_HOMEPAGE, data->input_dev->keybit);
 	set_bit(KEY_INT_CANCEL, data->input_dev->keybit);
 
 	input_set_abs_params(data->input_dev, ABS_MT_PALM, 0, 1, 0, 0);
@@ -318,6 +337,9 @@ void ist40xx_special_cmd(struct ist40xx_data *data, int cmd)
 		ist40xx_burst_read(data->client, IST40XX_HIB_GESTURE_MSG, g_msg.full,
 				sizeof(g_msg.full) / IST40XX_DATA_LEN, true);
 
+		input_info(true, &data->client->dev, "g_msg %d, %d, %d\n",
+					g_msg.b.eid, g_msg.b.gtype, g_msg.b.gid);
+
 		if (g_msg.b.eid == EID_GESTURE) {
 			switch (g_msg.b.gtype) {
 			case G_TYPE_SWIPE:
@@ -360,6 +382,27 @@ void ist40xx_special_cmd(struct ist40xx_data *data, int cmd)
 							 KEY_BLACK_UI_GESTURE,
 							 false);
 					input_sync(data->input_dev);
+				} else if (g_msg.b.gid == G_ID_DOUBLETAP_WAKEUP) {
+					input_info(true, &data->client->dev,
+							"AOT Double Tap Trigger\n");
+
+					input_report_key(data->input_dev,
+							 KEY_HOMEPAGE,
+							 true);
+					input_sync(data->input_dev);
+					input_report_key(data->input_dev,
+							 KEY_HOMEPAGE,
+							 false);
+					input_sync(data->input_dev);
+					/* request from sensor team */
+					input_report_abs(data->input_dev_proximity, 
+							ABS_MT_CUSTOM2,
+							true);
+					input_sync(data->input_dev_proximity);
+					input_report_abs(data->input_dev_proximity, 
+							ABS_MT_CUSTOM2,
+							false);
+					input_sync(data->input_dev_proximity);
 				}
 				break;
 			case G_TYPE_SINGLETAP:
@@ -386,7 +429,26 @@ void ist40xx_special_cmd(struct ist40xx_data *data, int cmd)
 				}
 				break;
 			case G_TYPE_PRESSURE:
+				break;
 			case G_TYPE_PRESS:
+				if (g_msg.b.gid == G_ID_FOD_LONG || g_msg.b.gid == G_ID_FOD_NORMAL) {
+					data->scrub_id = SPONGE_EVENT_TYPE_FOD;
+					input_info(true, &data->client->dev,
+					   "FOD %s\n", g_msg.b.gid ? "normal" : "long");
+				} else if (g_msg.b.gid == G_ID_FOD_RELEASE) {
+					data->scrub_id = SPONGE_EVENT_TYPE_FOD_RELEASE;
+					input_info(true, &data->client->dev,
+					   "FOD release\n");
+				}
+				input_report_key(data->input_dev,
+						 KEY_BLACK_UI_GESTURE,
+						 true);
+				input_sync(data->input_dev);
+				input_report_key(data->input_dev,
+						 KEY_BLACK_UI_GESTURE,
+						 false);
+				input_sync(data->input_dev);
+				break;
 			default:
 				input_err(true, &data->client->dev,
 					  "Not support gesture type\n");
@@ -747,7 +809,7 @@ state_idle:
  *   2nd  [31:28]   [27:24]   [23:12]   [11:0]
  *		Major	 Minor	 X		 Y
  */
-static irqreturn_t ist40xx_irq_thread(int irq, void *ptr)
+irqreturn_t ist40xx_irq_thread(int irq, void *ptr)
 {
 	int i, ret = 0;
 	int read_cnt;
@@ -764,9 +826,27 @@ static irqreturn_t ist40xx_irq_thread(int irq, void *ptr)
 	if (!data->irq_enabled)
 		goto irq_ignore;
 
-	if (data->status.sys_mode == STATE_LPM)
+#if defined(CONFIG_INPUT_SEC_SECURE_TOUCH)
+	if (ist40xx_filter_interrupt(data) == IRQ_HANDLED) {
+		ret = wait_for_completion_interruptible_timeout((&data->st_interrupt),
+				msecs_to_jiffies(10 * MSEC_PER_SEC));
+		return IRQ_HANDLED;
+	}
+#endif
+
+	if (data->status.sys_mode == STATE_LPM) {
 		pm_wakeup_event(data->input_dev->dev.parent, 2000);
-	else if (data->status.sys_mode == STATE_POWER_OFF)
+#ifdef CONFIG_PM
+		ret = wait_for_completion_interruptible_timeout(&data->resume_done, msecs_to_jiffies(500));
+		if (ret == 0) {
+			input_err(true, &data->client->dev, "%s: LPM: pm resume is not handled\n", __func__);
+			return IRQ_HANDLED;
+		} else if (ret < 0) {
+			input_err(true, &data->client->dev, "%s: LPM: -ERESTARTSYS if interrupted, %d\n", __func__, ret);
+			return IRQ_HANDLED;
+		}
+#endif
+	} else if (data->status.sys_mode == STATE_POWER_OFF)
 		goto irq_ignore;
 
 	ms = get_milli_second(data);
@@ -816,17 +896,6 @@ static irqreturn_t ist40xx_irq_thread(int irq, void *ptr)
 	/* TSP End Initial */
 	if (*msg == IST40XX_INITIAL_VALUE) {
 		tsp_debug("IC Ready~\n");
-		goto irq_event;
-	}
-
-	if ((*msg & IST40XX_HOVER_MASK) == IST40XX_HOVER_MSG) {
-		if (data->hover != IST40XX_HOVER_VAL(*msg))
-			data->hover = IST40XX_HOVER_VAL(*msg);
-
-		input_report_abs(data->input_dev_proximity, ABS_MT_CUSTOM, data->hover);
-		input_sync(data->input_dev_proximity);
-		input_info(true, &data->client->dev,"Hover Level %d\n", data->hover);
-
 		goto irq_event;
 	}
 
@@ -887,9 +956,7 @@ static irqreturn_t ist40xx_irq_thread(int irq, void *ptr)
 	ret = PARSE_SPECIAL_MESSAGE(*msg);
 	if (ret >= 0) {
 		tsp_debug("special cmd: %d (0x%08X)\n", ret, *msg);
-		mutex_lock(&data->aod_lock);
 		ist40xx_special_cmd(data, ret);
-		mutex_unlock(&data->aod_lock);
 
 		goto irq_event;
 	}
@@ -900,9 +967,20 @@ static irqreturn_t ist40xx_irq_thread(int irq, void *ptr)
 		goto irq_err;
 
 	read_cnt = PARSE_TOUCH_CNT(*msg);
-	if (read_cnt < 0) {
+	if (read_cnt <= 0 && !PARSE_HOVER_NOTI(*msg)) {
 		input_err(true, &data->client->dev, "report touch is none\n");
 		   goto irq_err;
+	}
+
+	if (PARSE_HOVER_NOTI(*msg)) {
+		if (data->hover != PARSE_HOVER_VAL(*msg))
+			data->hover = PARSE_HOVER_VAL(*msg);
+		input_report_abs(data->input_dev_proximity, ABS_MT_CUSTOM, data->hover);
+		input_sync(data->input_dev_proximity);
+		input_info(true, &data->client->dev, "Hover Level %d\n", data->hover);
+
+		if (read_cnt <= 0)
+			goto irq_event;
 	}
 
 	ret = ist40xx_burst_read(data->client, IST40XX_HIB_COORD, &msg[offset],
@@ -1029,17 +1107,15 @@ static int ist40xx_suspend(struct device *dev)
 #endif
 
 	mutex_lock(&data->lock);
-	if (data->lpm_mode && !data->prox_power_off) {
-		mutex_lock(&data->aod_lock);
+	if (data->lpm_mode) {
 		ist40xx_disable_irq(data);
 		ist40xx_cmd_gesture(data, IST40XX_ENABLE);
 
 		if (device_may_wakeup(&data->client->dev))
 			enable_irq_wake(data->client->irq);
 
-		ist40xx_enable_irq(data);
 		data->status.sys_mode = STATE_LPM;
-		mutex_unlock(&data->aod_lock);
+		ist40xx_enable_irq(data);
 	} else {
 		ist40xx_power_off(data);
 		ist40xx_disable_irq(data);
@@ -1103,16 +1179,14 @@ static int ist40xx_resume(struct device *dev)
 
 	mutex_lock(&data->lock);
 	if (data->status.sys_mode == STATE_LPM) {
-		mutex_lock(&data->aod_lock);
 		ist40xx_cmd_gesture(data, IST40XX_DISABLE);
 		mod_timer(&data->event_timer,
-				get_jiffies_64() + EVENT_TIMER_INTERVAL * 2);
+				get_jiffies_64() + EVENT_TIMER_INTERVAL);
 
 		if (device_may_wakeup(&data->client->dev))
 			disable_irq_wake(data->client->irq);
 
 		data->status.sys_mode = STATE_POWER_ON;
-		mutex_unlock(&data->aod_lock);
 	} else {
 #ifdef IST40XX_PINCTRL
 		if (data->pinctrl) {
@@ -1150,6 +1224,9 @@ static void ist40xx_ts_close(struct input_dev *dev)
 
 #ifdef TCLM_CONCEPT
 	sec_tclm_debug_info(data->tdata);
+#endif
+#if defined(CONFIG_INPUT_SEC_SECURE_TOUCH)
+	ist40xx_secure_touch_stop(data, 1);
 #endif
 
 	ist40xx_suspend(&data->client->dev);
@@ -1243,6 +1320,26 @@ void ist40xx_set_call_mode(int mode)
 				((eHCOM_SET_MODE_SPECIAL << 16) | (data->noise_mode & 0xFFFF)));
 }
 EXPORT_SYMBOL(ist40xx_set_call_mode);
+
+void ist40xx_set_halfaod_mode(int mode)
+{
+	struct ist40xx_data *data = ts_data;
+
+	if (mode == ((data->noise_mode >> NOISE_MODE_HALFAOD) & 1))
+		return;
+
+	input_info(true, &data->client->dev, "%s: mode = %d\n", __func__, mode);
+
+	if (mode)
+		data->noise_mode |= (1 << NOISE_MODE_HALFAOD);
+	else
+		data->noise_mode &= ~(1 << NOISE_MODE_HALFAOD);
+
+	if (data->initialized && (data->status.sys_mode != STATE_POWER_OFF))
+		ist40xx_write_cmd(data, IST40XX_HIB_CMD,
+				((eHCOM_SET_MODE_SPECIAL << 16) | (data->noise_mode & 0xFFFF)));
+}
+EXPORT_SYMBOL(ist40xx_set_halfaod_mode);
 
 void ist40xx_set_cover_mode(int mode)
 {
@@ -1353,11 +1450,11 @@ void ist40xx_set_touchable_mode(int mode)
 }
 EXPORT_SYMBOL(ist40xx_set_touchable_mode);
 
-#if 0
+#if defined(CONFIG_USB_TYPEC_MANAGER_NOTIFIER) || defined(CONFIG_MUIC_NOTIFIER)
 static int otg_flag = 0;
 #endif
 
-#if 0
+#ifdef CONFIG_USB_TYPEC_MANAGER_NOTIFIER
 static int tsp_ccic_notification(struct notifier_block *nb,
 	   unsigned long action, void *data)
 {
@@ -1379,7 +1476,7 @@ static int tsp_ccic_notification(struct notifier_block *nb,
 	return 0;
 }
 #else
-#if 0
+#ifdef CONFIG_MUIC_NOTIFIER
 static int tsp_muic_notification(struct notifier_block *nb,
 		unsigned long action, void *data)
 {
@@ -1406,7 +1503,7 @@ static int tsp_muic_notification(struct notifier_block *nb,
 #endif
 #endif
 
-#if 0
+#ifdef CONFIG_VBUS_NOTIFIER
 static int tsp_vbus_notification(struct notifier_block *nb,
 		unsigned long cmd, void *data)
 {
@@ -1446,6 +1543,14 @@ static void reset_work_func(struct work_struct *work)
 		return;
 	}
 #endif
+#ifdef CONFIG_INPUT_SEC_SECURE_TOUCH
+	if (atomic_read(&data->st_enabled) == SECURE_TOUCH_ENABLED) {
+		input_err(true, &data->client->dev,
+			  "%s: TSP no accessible from Linux, TUI is enabled!\n",
+			  __func__);
+		return;
+	}
+#endif
 
 	if ((data == NULL) || (data->client == NULL))
 		return;
@@ -1479,6 +1584,14 @@ static void noise_work_func(struct work_struct *work)
 #ifdef CONFIG_TRUSTONIC_TRUSTED_UI
 	if (TRUSTEDUI_MODE_INPUT_SECURED & trustedui_get_current_mode()) {
 		input_err(true, &data->client->dev, "%s: return, TUI is enabled!\n", __func__);
+		return;
+	}
+#endif
+#ifdef CONFIG_INPUT_SEC_SECURE_TOUCH
+	if (atomic_read(&data->st_enabled) == SECURE_TOUCH_ENABLED) {
+		input_err(true, &data->client->dev,
+			  "%s: TSP no accessible from Linux, TUI is enabled!\n",
+			  __func__);
 		return;
 	}
 #endif
@@ -1525,6 +1638,9 @@ retry_timer:
 	if (data->scan_retry >= data->max_scan_retry) {
 		ist40xx_scheduled_reset(data);
 		data->scan_retry = 0;
+	} else {
+		mod_timer(&data->event_timer,
+				get_jiffies_64() + EVENT_TIMER_INTERVAL / 10);
 	}
 }
 #else
@@ -1540,6 +1656,14 @@ static void release_work_func(struct work_struct *work)
 #ifdef CONFIG_TRUSTONIC_TRUSTED_UI
 	if (TRUSTEDUI_MODE_INPUT_SECURED & trustedui_get_current_mode()) {
 		input_err(true, &data->client->dev, "%s: return, TUI is enabled!\n", __func__);
+		return;
+	}
+#endif
+#ifdef CONFIG_INPUT_SEC_SECURE_TOUCH
+	if (atomic_read(&data->st_enabled) == SECURE_TOUCH_ENABLED) {
+		input_err(true, &data->client->dev,
+			  "%s: TSP no accessible from Linux, TUI is enabled!\n",
+			  __func__);
 		return;
 	}
 #endif
@@ -1603,6 +1727,7 @@ static int ist40xx_parse_dt(struct device *dev, struct ist40xx_data *data)
 {
 	struct device_node *np = dev->of_node;
 	u32 px_zone[3];
+	u32 cm_spec[3];
 
 	data->dt_data->irq_gpio = of_get_named_gpio(np, "imagis,irq-gpio", 0);
 
@@ -1666,11 +1791,27 @@ static int ist40xx_parse_dt(struct device *dev, struct ist40xx_data *data)
 		data->dt_data->area_edge = px_zone[2];
 	}
 
+	if (of_property_read_u32(np, "imagis,bringup",
+				 &data->dt_data->bringup) < 0)
+		data->dt_data->bringup = 0;
+
 	if (of_property_read_u32(np, "imagis,factory_item_version",
 				 &data->dt_data->item_version) < 0)
 		data->dt_data->item_version = 0;
 
 	data->dt_data->enable_settings_aot = of_property_read_bool(np, "enable_settings_aot");
+	data->dt_data->support_fod = of_property_read_bool(np, "support_fod");
+
+	if (of_property_read_u32_array(np, "imagis,cm_spec", cm_spec, 3)) {
+		input_err(true, dev, "%s: Failed to get zone's size\n", __func__);
+		data->dt_data->cm_min_spec = CM_MIN_SPEC;
+		data->dt_data->cm_max_spec = CM_MAX_SPEC;
+		data->dt_data->cm_spec_gap = SPEC_GAP;
+	} else {
+		data->dt_data->cm_min_spec = cm_spec[0];
+		data->dt_data->cm_max_spec = cm_spec[1];
+		data->dt_data->cm_spec_gap = cm_spec[2];
+	}
 
 	input_info(true, dev, "%s: irq:%d, tsp_ldo: %s\n", __func__,
 		   data->dt_data->irq_gpio, data->dt_data->regulator_avdd);
@@ -1797,9 +1938,9 @@ static void ist40xx_run_rawdata(struct ist40xx_data *data)
 	data->tsp_dump_lock = 1;
 #endif
 	input_raw_data_clear();
-	input_info(true, &data->client->dev, "%s start ##\n", __func__);
-	ist40xx_display_dump_log(data);
-	input_info(true, &data->client->dev, "%s done ##\n", __func__);
+	input_raw_info(true, &data->client->dev, "%s start ##\n", __func__);
+	ist40xx_display_booting_dump_log(data);
+	input_raw_info(true, &data->client->dev, "%s done ##\n", __func__);
 #ifdef CONFIG_TOUCHSCREEN_DUMP_MODE
 	data->tsp_dump_lock = 0;
 #endif
@@ -1817,16 +1958,16 @@ static void ist40xx_check_rawdata(struct work_struct *work)
 
 	if (data->tsp_dump_lock == 1) {
 		input_info(true, &data->client->dev,
-			   "%s: ignored ## already checking..\n", __func__);
+			"%s: ignored ## already checking..\n", __func__);
 		return;
 	}
 	if (data->status.sys_mode == STATE_POWER_OFF) {
 		input_info(true, &data->client->dev,
-			   "%s: ignored ## IC is power off\n", __func__);
+			"%s: ignored ## IC is power off\n", __func__);
 		return;
 	}
 
-	ist40xx_run_rawdata(data);
+	ist40xx_display_key_dump_log(data);
 }
 
 static void dump_tsp_log(void)
@@ -1891,6 +2032,7 @@ static void ist_set_input_prop_proximity(struct ist40xx_data *data, struct input
 	set_bit(INPUT_PROP_DIRECT, dev->propbit);
 
 	input_set_abs_params(dev, ABS_MT_CUSTOM, 0, 0xFFFFFFFF, 0, 0);
+	input_set_abs_params(dev, ABS_MT_CUSTOM2, 0, 0xFFFFFFFF, 0, 0);
 	input_set_drvdata(dev, data);
 }
 
@@ -2013,7 +2155,6 @@ static int ist40xx_probe(struct i2c_client *client,
 	data->irq_enabled = false;
 	data->status.event_mode = false;
 	mutex_init(&data->lock);
-	mutex_init(&data->aod_lock);
 	mutex_init(&data->i2c_lock);
 	ts_data = data;
 
@@ -2024,7 +2165,7 @@ static int ist40xx_probe(struct i2c_client *client,
 	data->max_irq_err_cnt = IST40XX_MAX_ERR_CNT;
 	data->report_rate = -1;
 	data->idle_rate = -1;
-	data->timer_period_ms = 500;
+	data->timer_period_ms = 5000;
 	data->status.sys_mode = STATE_POWER_OFF;
 	data->rec_mode = 0;
 	data->rec_file_name = kzalloc(IST40XX_REC_FILENAME_SIZE, GFP_KERNEL);
@@ -2039,6 +2180,8 @@ static int ist40xx_probe(struct i2c_client *client,
 	data->info_work_done = false;
 	data->rejectzone_t = 0;
 	data->rejectzone_b = 0;
+	data->hover = 0;
+	data->fod_property = 0;
 
 	for (i = 0; i < IST40XX_MAX_FINGER_ID; i++)
 		data->tsp_touched[i] = false;
@@ -2065,11 +2208,11 @@ static int ist40xx_probe(struct i2c_client *client,
 	trustedui_set_tsp_irq(client->irq);
 	input_info(true, &client->dev, "%s[%d] called!\n", __func__, client->irq);
 #endif
-#if 0
+
 	ret = ist40xx_auto_bin_update(data);
 	if (ret == 0)
 		goto err_irq;
-#endif
+
 	ret = ist40xx_get_info(data);
 	input_info(true, &client->dev, "Get info: %s\n", (ret == 0 ? "success" : "fail"));
 	if (ret)
@@ -2106,18 +2249,18 @@ static int ist40xx_probe(struct i2c_client *client,
 	data->event_timer.data = (unsigned long)data;
 	data->event_timer.function = timer_handler;
 	data->event_timer.expires = jiffies_64 + EVENT_TIMER_INTERVAL;
-	mod_timer(&data->event_timer, get_jiffies_64() + EVENT_TIMER_INTERVAL * 2);
+	mod_timer(&data->event_timer, get_jiffies_64() + EVENT_TIMER_INTERVAL);
 
-#if 0
+#ifdef CONFIG_USB_TYPEC_MANAGER_NOTIFIER
 	manager_notifier_register(&data->ccic_nb, tsp_ccic_notification,
 			MANAGER_NOTIFY_CCIC_USB);
 #else
-#if 0
+#ifdef CONFIG_MUIC_NOTIFIER
 	muic_notifier_register(&data->muic_nb, tsp_muic_notification,
 			MUIC_NOTIFY_DEV_CHARGER);
 #endif
 #endif
-#if 0
+#ifdef CONFIG_VBUS_NOTIFIER
 	vbus_notifier_register(&data->vbus_nb, tsp_vbus_notification,
 			VBUS_NOTIFY_DEV_CHARGER);
 #endif
@@ -2139,6 +2282,11 @@ static int ist40xx_probe(struct i2c_client *client,
 	p_ghost_check = &data->ghost_check;
 #endif
 
+#ifdef CONFIG_PM
+	init_completion(&data->resume_done);
+	complete_all(&data->resume_done);
+#endif
+
 	input_info(true, &client->dev, "### IMAGIS probe success ###\n");
 
 	return 0;
@@ -2151,9 +2299,7 @@ err_sec_sysfs:
 err_sysfs:
 	class_destroy(ist40xx_class);
 err_read_info:
-#if 0
 err_irq:
-#endif
 	ist40xx_disable_irq(data);
 	free_irq(client->irq, data);
 err_init_drv:
@@ -2260,6 +2406,33 @@ static const struct dev_pm_ops ist40xx_pm_ops = {
 	.suspend = ist40xx_suspend,
 	.resume = ist40xx_resume,
 };
+#else
+#ifdef CONFIG_PM
+static int ist40xx_pm_suspend(struct device *dev)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct ist40xx_data *data = i2c_get_clientdata(client);
+
+	reinit_completion(&data->resume_done);
+
+	return 0;
+}
+
+static int ist40xx_pm_resume(struct device *dev)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct ist40xx_data *data = i2c_get_clientdata(client);
+
+	complete_all(&data->resume_done);
+
+	return 0;
+}
+
+static const struct dev_pm_ops ist40xx_pm_ops = {
+	.suspend = ist40xx_pm_suspend,
+	.resume = ist40xx_pm_resume,
+};
+#endif
 #endif
 
 static struct i2c_driver ist40xx_i2c_driver = {
@@ -2273,6 +2446,10 @@ static struct i2c_driver ist40xx_i2c_driver = {
 		   .of_match_table = ist40xx_match_table,
 #if (!defined(CONFIG_HAS_EARLYSUSPEND) && !defined(USE_OPEN_CLOSE))
 		   .pm = &ist40xx_pm_ops,
+#else
+#ifdef CONFIG_PM
+		   .pm = &ist40xx_pm_ops,
+#endif
 #endif
 		   },
 };

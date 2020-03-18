@@ -1077,7 +1077,7 @@ int set_sensor_roi_control(struct fimc_is_sensor_interface *itf,
 		}
 	}
 
-	dbg_sensor(1, "[%s][F:%d]: %d\n", __func__, frame_count, sensor_ctl->update_3hdr_stat);
+	dbg_sensor(1, "[%s][F:%d]: %d\n", __func__, frame_count, sensor_ctl->update_roi);
 
 	return 0;
 }
@@ -1939,6 +1939,9 @@ int copy_sensor_ctl(struct fimc_is_sensor_interface *itf,
 #endif
 			itf->cis_mode = ITF_CIS_SMIA;
 
+		if (cis_data->is_data.wdr_enable)
+			itf->cis_mode = ITF_CIS_SMIA_WDR;
+
 		/* set frame rate : Limit of max frame duration
 		 * Frame duration is set by
 		 * 1. Manual sensor control
@@ -2070,6 +2073,11 @@ int get_initial_exposure_gain_of_sensor(struct fimc_is_sensor_interface *itf,
 	if (!sensor_peri) {
 		err("[%s] sensor_peri is NULL", __func__);
 		return -EINVAL;
+	}
+
+	if (num_data <= EXPOSURE_GAIN_COUNT_INVALID || num_data >= EXPOSURE_GAIN_COUNT_END) {
+		err("[%s] num_data is wrong (%d). num_data reset to 1 !!!\n", __func__, num_data);
+		num_data = EXPOSURE_GAIN_COUNT_1;
 	}
 
 	if (sensor_peri->cis.use_initial_ae) {
@@ -2640,6 +2648,10 @@ int get_vc_dma_buf(struct fimc_is_sensor_interface *itf,
 	if (!sensor) {
 		err("failed to get sensor device");
 		return -ENODEV;
+	} else if (!test_bit(FIMC_IS_SENSOR_FRONT_START, &sensor->state)) {
+		mwarn("[T%d][F%d]sensor is NOT working.", sensor,
+				request_data_type, frame_count);
+		return -EINVAL;
 	}
 
 	csi = (struct fimc_is_device_csi *)v4l2_get_subdevdata(sensor->subdev_csi);
@@ -2750,9 +2762,14 @@ int put_vc_dma_buf(struct fimc_is_sensor_interface *itf,
 
 	switch (request_data_type) {
 	case VC_BUF_DATA_TYPE_SENSOR_STAT1:
-	case VC_BUF_DATA_TYPE_SENSOR_STAT2:
 		for (ch = CSI_VIRTUAL_CH_1; ch < CSI_VIRTUAL_CH_MAX; ch++) {
 			if (sensor->cfg->output[ch].type == VC_TAILPDAF)
+				break;
+		}
+		break;
+	case VC_BUF_DATA_TYPE_SENSOR_STAT2:
+		for (ch = CSI_VIRTUAL_CH_1; ch < CSI_VIRTUAL_CH_MAX; ch++) {
+			if (sensor->cfg->output[ch].type == VC_EMBEDDED)
 				break;
 		}
 		break;
@@ -2895,6 +2912,7 @@ int get_vc_dma_buf_info(struct fimc_is_sensor_interface *itf,
 		|| (buf_info->sensor_mode == VC_SENSOR_MODE_IMX_2X1OCL_2_TAIL)
 		|| (buf_info->sensor_mode == VC_SENSOR_MODE_ULTRA_PD_TAIL)
 		|| (buf_info->sensor_mode == VC_SENSOR_MODE_SUPER_PD_TAIL)
+		|| (buf_info->sensor_mode == VC_SENSOR_MODE_SUPER_PD_2_TAIL)
 		|| (buf_info->sensor_mode == VC_SENSOR_MODE_MSPD_TAIL)
 		|| (buf_info->sensor_mode == VC_SENSOR_MODE_MSPD_GLOBAL_TAIL)) {
 		buf_info->width = sensor->cfg->output[ch].width;

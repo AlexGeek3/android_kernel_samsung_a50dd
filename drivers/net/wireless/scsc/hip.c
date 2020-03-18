@@ -155,6 +155,10 @@ static int slsi_hip_service_notifier(struct notifier_block *nb, unsigned long ev
 		mutex_unlock(&sdev->hip.hip_mutex);
 		break;
 
+	case SCSC_WIFI_SUBSYSTEM_RESET:
+	case SCSC_WIFI_CHIP_READY:
+		break;
+
 	default:
 		SLSI_INFO(sdev, "Unknown event code %lu\n", event);
 		break;

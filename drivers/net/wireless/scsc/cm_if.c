@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- * Copyright (c) 2012 - 2018 Samsung Electronics Co., Ltd. All rights reserved
+ * Copyright (c) 2012 - 2019 Samsung Electronics Co., Ltd. All rights reserved
  *
  *       Chip Manager interface
  *
@@ -14,7 +14,6 @@
 #include "hip4_sampler.h"
 #endif
 
-#include "../scsc/scsc_mx_impl.h" /* TODO */
 #include <scsc/scsc_mx.h>
 #ifdef CONFIG_SCSC_LOG_COLLECTION
 #include <scsc/scsc_log_collector.h>
@@ -33,7 +32,6 @@ MODULE_PARM_DESC(EnableRfTestMode, "Enable RF test mode driver.");
 static struct mutex slsi_start_mutex;
 static int recovery_in_progress;
 static u16 latest_scsc_panic_code;
-
 
 /* TODO: Would be good to get this removed - use module_client? */
 struct slsi_cm_ctx {
@@ -75,9 +73,36 @@ static int wlan_resume(struct scsc_service_client *client)
 	return 0;
 }
 
-static void wlan_stop_on_failure(struct scsc_service_client *client)
+#ifdef CONFIG_SCSC_WLAN_SILENT_RECOVERY
+static u8 wlan_failure_notification(struct scsc_service_client *client, struct mx_syserr_decode *err)
+{
+	struct slsi_dev *sdev = container_of(client, struct slsi_dev, mx_wlan_client);
+
+	atomic_set(&sdev->cm_if.reset_level, err->level);
+	SLSI_INFO_NODEV("SubSystem:%d,Level:%d,Type:%d,Sub_code:%d\n", err->subsys, err->level, err->type, err->subcode);
+	return err->level;
+}
+
+static void wlan_failure_reset_v2(struct scsc_service_client *client, u8 level, u16 scsc_syserr_code)
+{
+	struct slsi_dev *sdev = container_of(client, struct slsi_dev, mx_wlan_client);
+
+	SLSI_INFO_NODEV("Level:%d scsc_syserr_code:%d\n", level, scsc_syserr_code);
+	mutex_lock(&slsi_start_mutex);
+	atomic_set(&sdev->cm_if.reset_level, level);
+	mutex_unlock(&slsi_start_mutex);
+	if (level < 5)
+		SLSI_WARN_NODEV("Low level error level:%d\n", level);
+	if (level == 5 || level == 6)
+		blocking_notifier_call_chain(&slsi_wlan_notifier, SCSC_WIFI_SUBSYSTEM_RESET, sdev);
+	if (level == SLSI_WIFI_CM_IF_SYSTEM_ERROR_PANIC)
+		latest_scsc_panic_code = scsc_syserr_code;
+}
+
+static  bool wlan_stop_on_failure_v2(struct scsc_service_client *client, struct mx_syserr_decode *err)
 {
 	int state;
+	u8 system_error_level;
 	struct slsi_dev *sdev = container_of(client, struct slsi_dev, mx_wlan_client);
 
 	SLSI_INFO_NODEV("\n");
@@ -86,6 +111,69 @@ static void wlan_stop_on_failure(struct scsc_service_client *client)
 	recovery_in_progress = 1;
 	sdev->recovery_status = 1;
 	state = atomic_read(&sdev->cm_if.cm_if_state);
+	atomic_set(&sdev->cm_if.reset_level, err->level);
+	/* system error level is set in failure_notification. if this is not yet set, consider
+	 * a full panic. set it to SLSI_WIFI_CM_IF_SYSTEM_ERROR_PANIC
+	 */
+	system_error_level = atomic_read(&sdev->cm_if.reset_level);
+	if (!system_error_level) {
+		atomic_set(&sdev->cm_if.reset_level, SLSI_WIFI_CM_IF_SYSTEM_ERROR_PANIC);
+	}
+	if (state != SCSC_WIFI_CM_IF_STATE_STOPPED) {
+		atomic_set(&sdev->cm_if.cm_if_state, SCSC_WIFI_CM_IF_STATE_BLOCKED);
+		sdev->fail_reported = true;
+
+		/* If next state is stopped, then don't signal recovery since
+		 * the Android framework won't/shouldn't restart (supplicant
+		 * stop and start).
+		 */
+		if (sdev->recovery_next_state != SCSC_WIFI_CM_IF_STATE_STOPPING) {
+			slsi_hip_block_bh(sdev);
+
+			/* Stop wlan operations. Send event to registered parties */
+			mutex_unlock(&slsi_start_mutex);
+			SLSI_INFO_NODEV("Nofity registered functions\n");
+			blocking_notifier_call_chain(&slsi_wlan_notifier, SCSC_WIFI_STOP, sdev);
+			mutex_lock(&slsi_start_mutex);
+		}
+	} else {
+		SLSI_INFO_NODEV("Wi-Fi service driver not started\n");
+	}
+
+	mutex_unlock(&slsi_start_mutex);
+	return true;
+}
+#endif
+
+static void wlan_failure_reset(struct scsc_service_client *client, u16 scsc_panic_code)
+{
+	SLSI_INFO_NODEV("\n");
+	latest_scsc_panic_code = scsc_panic_code;
+}
+
+static void wlan_stop_on_failure(struct scsc_service_client *client)
+{
+	int state;
+#ifdef CONFIG_SCSC_WLAN_SILENT_RECOVERY
+	u8 system_error_level;
+#endif
+	struct slsi_dev *sdev = container_of(client, struct slsi_dev, mx_wlan_client);
+
+	SLSI_INFO_NODEV("\n");
+
+	mutex_lock(&slsi_start_mutex);
+	recovery_in_progress = 1;
+	sdev->recovery_status = 1;
+	state = atomic_read(&sdev->cm_if.cm_if_state);
+	/* system error level is set in failure_notification. if this is not yet set, consider
+	 * a full panic. set it to SLSI_WIFI_CM_IF_SYSTEM_ERROR_PANIC
+	 */
+#ifdef CONFIG_SCSC_WLAN_SILENT_RECOVERY
+	system_error_level = atomic_read(&sdev->cm_if.reset_level);
+	if (!system_error_level) {
+		atomic_set(&sdev->cm_if.reset_level, SLSI_WIFI_CM_IF_SYSTEM_ERROR_PANIC);
+	}
+#endif
 	if (state != SCSC_WIFI_CM_IF_STATE_STOPPED) {
 		atomic_set(&sdev->cm_if.cm_if_state, SCSC_WIFI_CM_IF_STATE_BLOCKED);
 		sdev->fail_reported = true;
@@ -110,26 +198,28 @@ static void wlan_stop_on_failure(struct scsc_service_client *client)
 	mutex_unlock(&slsi_start_mutex);
 }
 
-static void wlan_failure_reset(struct scsc_service_client *client, u16 scsc_panic_code)
-{
-	SLSI_INFO_NODEV("\n");
-	latest_scsc_panic_code = scsc_panic_code;
-}
 
 int slsi_check_rf_test_mode(void)
 {
 	struct file *fp = NULL;
-#if defined(ANDROID_VERSION) && ANDROID_VERSION >= 90000
+#if defined(SCSC_SEP_VERSION) && SCSC_SEP_VERSION >= 90000
 	char *filepath = "/data/vendor/conn/.psm.info";
 #else
 	char *filepath = "/data/misc/conn/.psm.info";
 #endif
+	char *file_path = "/data/vendor/wifi/rftest.info";
 	char power_val = 0;
 
+	/* reading power value from /data/vendor/conn/.psm.info */
 	fp = filp_open(filepath, O_RDONLY, 0);
 	if (IS_ERR(fp) || (!fp)) {
 		pr_err("%s is not exist.\n", filepath);
-		return -ENOENT; /* -2 */
+		/* reading power value from /data/vendor/wifi/rftest.info */
+		fp = filp_open(file_path, O_RDONLY, 0);
+		if(IS_ERR(fp) || (!fp)) {
+			pr_err("%s is not exist.\n", file_path);
+			return -ENOENT; /* -2 */
+		}
 	}
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0)
@@ -179,16 +269,25 @@ void slsi_wlan_service_probe(struct scsc_mx_module_client *module_client, struct
 		recovery_in_progress = 0;
 		sdev->fail_reported = false;
 		sdev->recovery_status = 0;
-		sdev->mlme_blocked = false;
+#ifdef CONFIG_SCSC_WLAN_SILENT_RECOVERY
+		mutex_unlock(&slsi_start_mutex);
+		blocking_notifier_call_chain(&slsi_wlan_notifier, SCSC_WIFI_CHIP_READY, sdev);
+		mutex_lock(&slsi_start_mutex);
+#endif
 		complete_all(&sdev->recovery_completed);
 	} else {
 		/* Register callbacks */
+#ifdef CONFIG_SCSC_WLAN_SILENT_RECOVERY
+		mx_wlan_client.failure_notification = wlan_failure_notification;
+		mx_wlan_client.stop_on_failure_v2   = wlan_stop_on_failure_v2;
+		mx_wlan_client.failure_reset_v2     = wlan_failure_reset_v2;
+#endif
 		mx_wlan_client.stop_on_failure   = wlan_stop_on_failure;
 		mx_wlan_client.failure_reset     = wlan_failure_reset;
 		mx_wlan_client.suspend           = wlan_suspend;
 		mx_wlan_client.resume            = wlan_resume;
 
-		dev = scsc_mx_get_device(mx);
+		dev = scsc_service_get_device_by_mx(mx);
 
 		/* The mutex must be released at this point since the attach
 		 * process may call various functions including
@@ -229,7 +328,9 @@ void slsi_wlan_service_probe(struct scsc_mx_module_client *module_client, struct
 
 	if (reason != SCSC_MODULE_CLIENT_REASON_RECOVERY)
 		atomic_set(&sdev->cm_if.cm_if_state, SCSC_WIFI_CM_IF_STATE_PROBED);
-
+#ifdef CONFIG_SCSC_WLAN_SILENT_RECOVERY
+	atomic_set(&sdev->cm_if.reset_level, 0);
+#endif
 done:
 	mutex_unlock(&slsi_start_mutex);
 }
@@ -260,6 +361,9 @@ static void slsi_wlan_service_remove(struct scsc_mx_module_client *module_client
 {
 	struct slsi_dev *sdev;
 	int             state;
+#ifdef CONFIG_SCSC_WLAN_SILENT_RECOVERY
+	int level = 0;
+#endif
 
 	SLSI_UNUSED_PARAMETER(mx);
 	SLSI_UNUSED_PARAMETER(module_client);
@@ -285,34 +389,40 @@ static void slsi_wlan_service_remove(struct scsc_mx_module_client *module_client
 			SLSI_INFO_NODEV("Nofity registered functions\n");
 			blocking_notifier_call_chain(&slsi_wlan_notifier, SCSC_WIFI_FAILURE_RESET, sdev);
 		}
-
-		mutex_lock(&slsi_start_mutex);
+#ifdef CONFIG_SCSC_WLAN_SILENT_RECOVERY
+		level = atomic_read(&sdev->cm_if.reset_level);
+		if (level == SLSI_WIFI_CM_IF_SYSTEM_ERROR_PANIC) {
+#endif
+			mutex_lock(&slsi_start_mutex);
 		/**
 		 * If there was a request to stop during the recovery, then do
 		 * not sent a hang - just stop here. The Wi-Fi service driver is
 		 * ready to be turned on again. Let the service_stop complete.
 		 */
-		complete_all(&sdev->recovery_remove_completion);
-		if (sdev->recovery_next_state == SCSC_WIFI_CM_IF_STATE_STOPPING) {
-			SLSI_INFO_NODEV("Recovery - next state stopping\n");
-		} else {
-			SLSI_INFO_NODEV("Calling slsi_send_hanged_vendor_event with latest_scsc_panic_code=0x%x\n",
-					latest_scsc_panic_code);
-			if (slsi_send_hanged_vendor_event(sdev, latest_scsc_panic_code) < 0)
-				SLSI_ERR(sdev, "Failed to send hang event\n");
+			complete_all(&sdev->recovery_remove_completion);
+			if (sdev->recovery_next_state == SCSC_WIFI_CM_IF_STATE_STOPPING) {
+				SLSI_INFO_NODEV("Recovery - next state stopping\n");
+			} else {
+				SLSI_INFO_NODEV("Calling slsi_send_hanged_vendor_event with latest_scsc_panic_code=0x%x\n",
+						latest_scsc_panic_code);
+				if (slsi_send_hanged_vendor_event(sdev, latest_scsc_panic_code) < 0)
+					SLSI_ERR(sdev, "Failed to send hang event\n");
 
 			/* Complete any pending ctrl signals, which will prevent
 			 * the hang event from being processed.
 			 */
-			complete_all(&sdev->sig_wait.completion);
-		}
+				complete_all(&sdev->sig_wait.completion);
+			}
 
-		mutex_unlock(&slsi_start_mutex);
-		r = wait_for_completion_timeout(&sdev->recovery_stop_completion,
+			mutex_unlock(&slsi_start_mutex);
+
+			r = wait_for_completion_timeout(&sdev->recovery_stop_completion,
 						msecs_to_jiffies(sdev->recovery_timeout));
-		if (r == 0)
-			SLSI_INFO(sdev, "recovery_stop_completion timeout\n");
-
+			if (r == 0)
+				SLSI_INFO(sdev, "recovery_stop_completion timeout\n");
+#ifdef CONFIG_SCSC_WLAN_SILENT_RECOVERY
+		}
+#endif
 		mutex_lock(&slsi_start_mutex);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 13, 0)
 		reinit_completion(&sdev->recovery_stop_completion);
@@ -421,6 +531,141 @@ bool slsi_is_rf_test_mode_enabled(void)
 #define SLSI_SM_WLAN_SERVICE_RECOVERY_COMPLETED_TIMEOUT 20000
 #define SLSI_SM_WLAN_SERVICE_RECOVERY_DISABLED_TIMEOUT 2000
 
+int slsi_sm_recovery_service_stop(struct slsi_dev *sdev)
+{
+	int err = 0;
+
+	mutex_lock(&slsi_start_mutex);
+	SLSI_INFO_NODEV("Stopping WLAN service\n");
+	atomic_set(&sdev->cm_if.cm_if_state, SCSC_WIFI_CM_IF_STATE_STOPPING);
+	err = scsc_mx_service_stop(sdev->service);
+	if (err == -EILSEQ || err == -EIO)
+		SLSI_INFO(sdev, "scsc_mx_service_stop failed err: %d\n", err);
+	else
+		err = 0;
+	atomic_set(&sdev->cm_if.cm_if_state, SCSC_WIFI_CM_IF_STATE_STOPPED);
+	mutex_unlock(&slsi_start_mutex);
+	return err;
+}
+
+int slsi_sm_recovery_service_close(struct slsi_dev *sdev)
+{
+	int err = 0;
+
+	mutex_lock(&slsi_start_mutex);
+	SLSI_INFO_NODEV("Closing WLAN service\n");
+	err = scsc_mx_service_close(sdev->service);
+	if (err == -EILSEQ || err == -EIO)
+		SLSI_INFO(sdev, "scsc_mx_service_close failed err: %d\n", err);
+	else
+		err = 0;
+	mutex_unlock(&slsi_start_mutex);
+	return err;
+}
+
+int slsi_sm_recovery_service_open(struct slsi_dev *sdev)
+{
+	int err = 0;
+
+	mutex_lock(&slsi_start_mutex);
+	SLSI_INFO_NODEV("Open WLAN service\n");
+	sdev->service = scsc_mx_service_open(sdev->maxwell_core, SCSC_SERVICE_ID_WLAN, &sdev->mx_wlan_client, &err);
+	if (err == -EILSEQ || err == -EIO)
+		SLSI_INFO(sdev, "scsc_mx_service_open failed err: %d\n", err);
+	else
+		err = 0;
+	mutex_unlock(&slsi_start_mutex);
+	return err;
+}
+
+int slsi_sm_recovery_service_start(struct slsi_dev *sdev)
+{
+	int err = 0, err2 = 0;
+	struct slsi_hip4 *hip = &sdev->hip4_inst;
+	scsc_mifram_ref  ref;
+	int              state;
+
+	mutex_lock(&slsi_start_mutex);
+	state = atomic_read(&sdev->cm_if.cm_if_state);
+	SLSI_INFO(sdev,
+		  "Recovery -- Status:%d  In_Progress:%d  -- cm_if_state:%d\n",
+		  sdev->recovery_status, recovery_in_progress, state);
+	if (state != SCSC_WIFI_CM_IF_STATE_PROBED &&
+	    state != SCSC_WIFI_CM_IF_STATE_STOPPED) {
+		SLSI_INFO(sdev, "State-event error %d\n", state);
+		mutex_unlock(&slsi_start_mutex);
+		return -EINVAL;
+	}
+
+	atomic_set(&sdev->cm_if.cm_if_state, SCSC_WIFI_CM_IF_STATE_STARTING);
+#ifdef CONFIG_SCSC_PCIE
+	err = scsc_mx_service_mifram_alloc(sdev->service, 1.5 * 1024 * 1024, &sdev->hip4_inst.hip_ref, 4096);
+#else
+	err = scsc_mx_service_mifram_alloc(sdev->service, 2 * 1024 * 1024, &sdev->hip4_inst.hip_ref, 4096);
+#endif
+	if (err) {
+		SLSI_WARN(sdev, "scsc_mx_service_mifram_alloc failed err: %d\n", err);
+		atomic_set(&sdev->cm_if.cm_if_state, SCSC_WIFI_CM_IF_STATE_STOPPED);
+		mutex_unlock(&slsi_start_mutex);
+		return err;
+	}
+
+	err = slsi_hip_start(sdev);
+	if (err) {
+		SLSI_WARN(sdev, "slsi_hip_start failed err: %d\n", err);
+		atomic_set(&sdev->cm_if.cm_if_state, SCSC_WIFI_CM_IF_STATE_STOPPED);
+		slsi_hip_stop(sdev);
+		mutex_unlock(&slsi_start_mutex);
+		return err;
+	}
+
+	err = scsc_mx_service_mif_ptr_to_addr(sdev->service, hip->hip_control, &ref);
+	if (err) {
+		SLSI_WARN(sdev, "scsc_mx_service_mif_ptr_to_addr failed err: %d\n", err);
+		atomic_set(&sdev->cm_if.cm_if_state, SCSC_WIFI_CM_IF_STATE_STOPPED);
+		slsi_hip_stop(sdev);
+		mutex_unlock(&slsi_start_mutex);
+		return err;
+	}
+
+
+	err = scsc_mx_service_start(sdev->service, ref);
+	if (err) {
+		SLSI_WARN(sdev, "scsc_mx_service_start failed err: %d\n", err);
+		atomic_set(&sdev->cm_if.cm_if_state, SCSC_WIFI_CM_IF_STATE_STOPPED);
+		slsi_hip_stop(sdev);
+		mutex_unlock(&slsi_start_mutex);
+		return err;
+	}
+	err = slsi_hip_setup(sdev);
+	if (err) {
+		SLSI_WARN(sdev, "slsi_hip_setup failed err: %d\n", err);
+		atomic_set(&sdev->cm_if.cm_if_state, SCSC_WIFI_CM_IF_STATE_STOPPED);
+		err2 = scsc_mx_service_stop(sdev->service);
+		if (err2)
+			SLSI_INFO(sdev, "scsc_mx_service_stop failed err2: %d\n", err2);
+		slsi_hip_stop(sdev);
+		mutex_unlock(&slsi_start_mutex);
+		return err;
+	}
+
+	/* Service has started, inform SAP versions to the registered SAPs */
+	err = slsi_hip_sap_setup(sdev);
+	if (err) {
+		SLSI_WARN(sdev, "slsi_hip_sap_setup failed err: %d\n", err);
+		atomic_set(&sdev->cm_if.cm_if_state, SCSC_WIFI_CM_IF_STATE_STOPPED);
+		err2 = scsc_mx_service_stop(sdev->service);
+		if (err2)
+			SLSI_INFO(sdev, "scsc_mx_service_stop failed err2: %d\n", err2);
+		slsi_hip_stop(sdev);
+		mutex_unlock(&slsi_start_mutex);
+		return err;
+	}
+	atomic_set(&sdev->cm_if.cm_if_state, SCSC_WIFI_CM_IF_STATE_STARTED);
+	mutex_unlock(&slsi_start_mutex);
+	return err;
+}
+
 int slsi_sm_wlan_service_open(struct slsi_dev *sdev)
 {
 	int err = 0;
@@ -523,6 +768,10 @@ int slsi_sm_wlan_service_start(struct slsi_dev *sdev)
 	if (err) {
 		SLSI_WARN(sdev, "scsc_mx_service_start failed err: %d\n", err);
 		atomic_set(&sdev->cm_if.cm_if_state, SCSC_WIFI_CM_IF_STATE_STOPPED);
+		if (err == -EILSEQ) {
+			sdev->cm_if.recovery_state = SLSI_RECOVERY_SERVICE_STOPPED;
+			sdev->require_service_close = true;
+		}
 		slsi_hip_stop(sdev);
 		mutex_unlock(&slsi_start_mutex);
 		return err;
@@ -666,14 +915,25 @@ void slsi_sm_wlan_service_close(struct slsi_dev *sdev)
 	mutex_lock(&slsi_start_mutex);
 	cm_if_state = atomic_read(&sdev->cm_if.cm_if_state);
 	if (cm_if_state != SCSC_WIFI_CM_IF_STATE_STOPPED) {
-		SLSI_INFO(sdev, "Service not stopped\n");
+		SLSI_INFO(sdev, "Service not stopped. cm_if_state = %d\n", cm_if_state);
+
+		/**
+		 * Close the service if failure has occurred after service has successfully opened
+		 * but before service has attempted to start
+		 */
+		if (cm_if_state == SCSC_WIFI_CM_IF_STATE_PROBED) {
+			SLSI_INFO_NODEV("Closing WLAN service on error\n");
+			r = scsc_mx_service_close(sdev->service);
+		}
 		goto exit;
 	}
 
 	SLSI_INFO_NODEV("Closing WLAN service\n");
 	scsc_mx_service_mifram_free(sdev->service, sdev->hip4_inst.hip_ref);
+
 	r = scsc_mx_service_close(sdev->service);
 	if (r == -EIO) {
+#ifndef CONFIG_SCSC_WLAN_SILENT_RECOVERY
 		int retry_counter;
 
 		/**
@@ -692,10 +952,15 @@ void slsi_sm_wlan_service_close(struct slsi_dev *sdev)
 				break;
 			}
 		}
-
 		if (retry_counter + 1 == SLSI_SM_WLAN_SERVICE_CLOSE_RETRY)
 			SLSI_ERR(sdev, "scsc_mx_service_close failed %d times\n",
 				 SLSI_SM_WLAN_SERVICE_CLOSE_RETRY);
+#else
+		/**
+		 * Error handling in progress
+		 */
+		SLSI_INFO(sdev, "scsc_mx_service_close failed with error:%d\n", r);
+#endif
 	} else if (r == -EPERM) {
 		SLSI_ERR(sdev, "scsc_mx_service_close - recovery is disabled (%d)\n", r);
 	}

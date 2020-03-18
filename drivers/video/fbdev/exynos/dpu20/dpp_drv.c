@@ -492,12 +492,12 @@ static int dpp_stop(struct dpp_device *dpp, bool reset)
 
 	DPU_EVENT_LOG(DPU_EVT_DPP_STOP, &dpp->sd, ktime_set(0, 0));
 
+	del_timer(&dpp->d.op_timer);
+	dpp_reg_deinit(dpp->id, reset, dpp->attr);
+
 	disable_irq(dpp->res.dma_irq);
 	if (test_bit(DPP_ATTR_DPP, &dpp->attr))
 		disable_irq(dpp->res.irq);
-
-	del_timer(&dpp->d.op_timer);
-	dpp_reg_deinit(dpp->id, reset, dpp->attr);
 
 	dpp_dbg("dpp%d is stopped\n", dpp->id);
 

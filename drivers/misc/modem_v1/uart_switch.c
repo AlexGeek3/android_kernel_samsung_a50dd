@@ -13,7 +13,7 @@
 #include <linux/of.h>
 #include <linux/of_platform.h>
 #include <linux/delay.h>
-#include <linux/sec_sysfs.h>
+#include <linux/sec_class.h>
 #include <linux/mcu_ipc.h>
 
 #if defined(CONFIG_MUIC_NOTIFIER)

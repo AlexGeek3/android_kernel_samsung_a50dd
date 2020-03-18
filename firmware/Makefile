@@ -17,13 +17,23 @@ fw-external-$(CONFIG_EXYNOS9610_ACPM) += exynos9610_acpm_tmu.fw
 fw-external-$(CONFIG_TOUCHSCREEN_SYNAPTICS_I2C_DSX) += tsp_synaptics/synaptics_b0_h.fw
 fw-shipped-$(CONFIG_TOUCHSCREEN_SEC_TS) += tsp_sec/y761_dream1.fw
 fw-shipped-$(CONFIG_TOUCHSCREEN_IST40XX) += tsp_imagis/ist40xx_a7_2018.fw tsp_imagis/ist40xx_a7_2018_cmcs.bin
-fw-external-$(CONFIG_TOUCHSCREEN_MELFAS_MSS100) += tsp_melfas/mss100_a50.fw tsp_melfas/mss100_a50_p01.fw
+fw-external-$(CONFIG_TOUCHSCREEN_MELFAS_MSS100) += tsp_melfas/mss100_a50.fw tsp_melfas/mss100_m30s.fw \
+							tsp_melfas/mss100_a50s.fw tsp_melfas/mss100_a51.fw
+fw-external-$(CONFIG_TOUCHSCREEN_IST40XX) += tsp_imagis/ist40xx_a80.bin tsp_imagis/ist40xx_a80_cmcs.bin
 
 fw-shipped-$(CONFIG_FIVE_TEE_DRIVER) += five/ffffffff000000000000000000000072.tlbin
 
 # Touch based grip sensor
 fw-external-$(CONFIG_SENSORS_A96T3X6) += abov/a96t326_voguelte.fw
 fw-external-$(CONFIG_SENSORS_TC3XXK) += coreriver/tc305k_a50ser.fw
+fw-external-$(CONFIG_SENSORS_A96T3X6_M30S) += abov/a96t326_m30s.fw
+
+# sensorhub
+fw-external-$(CONFIG_SENSORS_SSP) += sensorhub/shub_bl.fw
+fw-external-$(CONFIG_SENSORS_SSP_A50) += sensorhub/shub_exynos9610_a50.fw
+fw-external-$(CONFIG_SENSORS_SSP_A50S) += sensorhub/shub_exynos9611_a50s.fw
+fw-external-$(CONFIG_SENSORS_SSP_M30S) += sensorhub/shub_exynos9611_m30s.fw
+fw-external-$(CONFIG_SENSORS_SSP_A51) += sensorhub/shub_exynos9611_a51.fw
 
 quiet_cmd_ihex  = IHEX    $@
       cmd_ihex  = $(OBJCOPY) -Iihex -Obinary $< $@

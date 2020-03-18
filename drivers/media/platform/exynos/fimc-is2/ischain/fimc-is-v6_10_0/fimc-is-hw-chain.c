@@ -104,7 +104,7 @@ static struct fimc_is_field sysreg_cam_fields[SYSREG_CAM_REG_FIELD_CNT] = {
  * [1] I_PAFSTAT_CORE0_IN_CSIS1_EN
  * [0] I_PAFSTAT_CORE0_IN_CSIS0_EN
  */
-#define MUX_SET_VAL_DEFAULT		(0x00582077)
+#define MUX_SET_VAL_DEFAULT		(0x005820FF)
 #define MUX_CLR_VAL_DEFAULT		(0x007FFFFF)
 
 /* Define default subdev ops if there are not used subdev IP */
@@ -126,6 +126,90 @@ struct fimc_is_clk_gate clk_gate_vra;
 
 void __iomem *hwfc_rst;
 void __iomem *isp_lhm_atb_glue_rst;
+
+#if defined(SECURE_CAMERA_FACE)
+static int _fimc_is_hw_camif_secure_cfg(void *sensor_data)
+{
+	int ret = 0;
+	struct fimc_is_device_sensor *sensor;
+	struct exynos_platform_fimc_is_sensor *pdata;
+	struct fimc_is_device_csi *csi;
+	struct fimc_is_device_ischain *ischain;
+	u32 paf_ch = 0;
+	u32 csi_ch = 0;
+	u32 mux_set_val = MUX_SET_VAL_DEFAULT;
+	u32 mux_clr_val = MUX_CLR_VAL_DEFAULT;
+	unsigned long mux_backup_val = 0;
+
+	FIMC_BUG(!sensor_data);
+
+	sensor = (struct fimc_is_device_sensor *)sensor_data;
+
+	csi = (struct fimc_is_device_csi *)v4l2_get_subdevdata(sensor->subdev_csi);
+	if (!csi) {
+		merr("No CSIS device", sensor);
+		ret = -ENODEV;
+		goto p_err;
+	}
+
+	pdata = sensor->pdata;
+	if (!pdata) {
+		merr("Invalid platform_data of sensor", sensor);
+		ret = -EINVAL;
+		goto p_err;
+	}
+
+	ischain = sensor->ischain;
+	if (!ischain) {
+		merr("No ISChain device", sensor);
+		ret = -ENODEV;
+		goto p_err;
+	}
+
+	csi_ch = csi->instance;
+	if (csi_ch >= CSI_ID_MAX) {
+		merr("CSI channel is invalid(%d)", sensor, csi_ch);
+		ret = -ERANGE;
+		goto p_err;
+	}
+
+	if (!pdata->camif_mux_val_s) {
+		merr("Invalid camif_mux_val_s", sensor);
+		ret = -EINVAL;
+		goto p_err;
+	}
+
+	paf_ch = (ischain->group_3aa.id == GROUP_ID_3AA1) ? 1 : 0;
+	mux_set_val = pdata->camif_mux_val_s;
+
+	mutex_lock(&ischain->resourcemgr->sysreg_lock);
+
+	/* read previous value */
+	exynos_smc_readsfr((TZPC_CAM + TZPC_DECPROT1STAT_OFFSET), &mux_backup_val);
+
+	minfo("[S]CSI(%d) --> PAFSTAT(%d), mux(0x%08X), backup(0x%08lX)\n",
+		sensor, csi_ch, paf_ch, mux_set_val, mux_backup_val);
+
+	if (mux_backup_val != (unsigned long)mux_set_val) {
+		/* SMC call for PAFSTAT MUX */
+		ret = exynos_smc(SMC_CMD_REG, SMC_REG_ID_SFR_W(TZPC_CAM + TZPC_DECPROT1CLR_OFFSET), mux_clr_val, 0);
+		if (ret)
+			err("CAMIF mux clear is Error(%x)\n", ret);
+
+		ret = exynos_smc(SMC_CMD_REG, SMC_REG_ID_SFR_W(TZPC_CAM + TZPC_DECPROT1SET_OFFSET), mux_set_val, 0);
+		if (ret)
+			err("CAMIF mux set is Error(%x)\n", ret);
+
+		exynos_smc_readsfr((TZPC_CAM + TZPC_DECPROT1STAT_OFFSET), &mux_backup_val);
+		info_hw("CAMIF mux status(0x%x) is (0x%lx)\n", (TZPC_CAM + TZPC_DECPROT1STAT_OFFSET), mux_backup_val);
+	}
+
+	mutex_unlock(&ischain->resourcemgr->sysreg_lock);
+
+p_err:
+	return ret;
+}
+#endif
 
 void fimc_is_enter_lib_isr(void)
 {
@@ -345,6 +429,16 @@ int fimc_is_hw_camif_cfg(void *sensor_data)
 	if (!core)
 		goto p_err;
 
+#if defined(SECURE_CAMERA_FACE)
+	mutex_lock(&core->secure_state_lock);
+	if (core->secure_state == FIMC_IS_STATE_UNSECURE
+		&& core->scenario == FIMC_IS_SCENARIO_SECURE) {
+		mutex_unlock(&core->secure_state_lock);
+		return _fimc_is_hw_camif_secure_cfg(sensor_data);
+	}
+	mutex_unlock(&core->secure_state_lock);
+#endif
+
 	ischain = sensor->ischain;
 	if (!ischain)
 		goto p_err;
@@ -365,6 +459,8 @@ int fimc_is_hw_camif_cfg(void *sensor_data)
 	
 	/* default PIP set by DT */
 	multi_ch = pdata->multi_ch;
+	if (pdata->camif_mux_val)
+		mux_set_val = pdata->camif_mux_val;
 
 	for (i = 0; i < FIMC_IS_SENSOR_COUNT; i++) {
 		if (test_bit(FIMC_IS_SENSOR_OPEN, &(core->sensor[i].state))
@@ -438,7 +534,7 @@ int fimc_is_hw_camif_cfg(void *sensor_data)
 	mux_set_val = fimc_is_hw_set_field_value(mux_set_val,
 					&sysreg_cam_fields[SYSREG_CAM_F_CSIS2_DPHY_S_MUXSEL], csi2_mux);
 
-	minfo("CSI(%d) --> PAFSTAT(%d), mux(0x%08X), backup(0x%08lX)\n",
+	minfo("[NS]CSI(%d) --> PAFSTAT(%d), mux(0x%08X), backup(0x%08lX)\n",
 		sensor, csi_ch, paf_ch, mux_set_val, mux_backup_val);
 
 	if (mux_backup_val != (unsigned long)mux_set_val) {

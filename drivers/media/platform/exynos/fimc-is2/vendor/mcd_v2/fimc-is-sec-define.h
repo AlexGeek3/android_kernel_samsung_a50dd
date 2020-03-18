@@ -98,6 +98,9 @@
 #define FW_IMX576			"B24LS" /*IMX576 REAR*/
 #define FW_IMX576_C		"C24LS" /*IMX576 FRONT*/
 
+#define FW_IMX582			"K48LS" /*IMX582 REAR*/
+#define FW_IMX586			"K48LS" /*IMX586 REAR*/
+
 #define FW_SR846_P			"P08LF" /*SR846 FRONT*/
 
 #define SDCARD_FW
@@ -109,6 +112,7 @@
 #define FIMC_IS_2P6_SETF			"setfile_2p6.bin"
 #define FIMC_IS_3M3_SETF			"setfile_3m3.bin"
 #define FIMC_IS_3L2_SETF			"setfile_3l2.bin"
+#define FIMC_IS_3L6_SETF			"setfile_3l6.bin"
 #define FIMC_IS_3P8SP_SETF			"setfile_3p8sp.bin"
 #define FIMC_IS_4H5YC_SETF			"setfile_4h5yc.bin"
 #define FIMC_IS_4HA_SETF			"setfile_4ha.bin"
@@ -116,15 +120,20 @@
 #define FIMC_IS_5E3_SETF			"setfile_5e3.bin"
 #define FIMC_IS_5E9_SETF			"setfile_5e9.bin"
 #define FIMC_IS_2X5_SETF			"setfile_2x5.bin"
+#define FIMC_IS_GM2_SETF			"setfile_gm2.bin"
 
 #define FIMC_IS_IMX258_SETF			"setfile_imx258.bin"
 #define FIMC_IS_IMX576_SETF			"setfile_imx576.bin"
 #define FIMC_IS_IMX576_FRONT_SETF	"setfile_imx576_front.bin"
+#define FIMC_IS_IMX582_SETF			"setfile_imx582.bin"
+#define FIMC_IS_IMX586_SETF			"setfile_imx586.bin"
+#define FIMC_IS_IMX616_SETF			"setfile_imx616.bin"
 
 #define FIMC_IS_SR556_SETF			"setfile_sr556.bin"
 #define FIMC_IS_SR846_FRONT_SETF	"setfile_sr846_front.bin"
 
 #define FIMC_IS_GC5035_SETF			"setfile_gc5035.bin"
+#define FIMC_IS_HI1336_SETF			"setfile_hi1336.bin"
 
 #define FIMC_IS_CAL_SDCARD_FRONT		"/data/cal_data_front.bin"
 #define FIMC_IS_FW_FROM_SDCARD			"/data/media/0/CamFW_Main.bin"
@@ -150,6 +159,9 @@
 #endif
 #ifdef USE_AP_PDAF
 #define FIMC_IS_AP_PDAF_VER_SIZE     11
+#endif
+#ifdef USE_AE_CAL
+#define FIMC_IS_AE_CAL_VER_SIZE      11
 #endif
 
 #define FIMC_IS_RESOLUTION_DATA_SIZE 54
@@ -207,6 +219,13 @@ struct fimc_is_rom_info {
 	char		ap_pdaf_ver[FIMC_IS_AP_PDAF_VER_SIZE + 1];
 #endif
 
+#ifdef USE_AE_CAL
+	u32		ae_cal_section_crc_addr;
+	u32		ae_cal_start_addr;
+	u32		ae_cal_end_addr;
+	char		ae_cal_ver[FIMC_IS_AE_CAL_VER_SIZE+1];
+#endif
+
 	unsigned long		fw_size;
 	unsigned long		setfile_size;
 	u8		sensor_version;
@@ -260,6 +279,7 @@ int fimc_is_sec_rom_power_off(struct fimc_is_core *core, int position);
 int fimc_is_sec_get_pixel_size(char *header_ver);
 int fimc_is_sec_core_voltage_select(struct device *dev, char *header_ver);
 int fimc_is_get_dual_cal_buf(int slave_position, char **buf, int *size);
+int fimc_is_get_remosaic_cal_buf(int slave_position, char **buf, int *size);
 
 void remove_dump_fw_file(void);
 #endif /* FIMC_IS_SEC_DEFINE_H */

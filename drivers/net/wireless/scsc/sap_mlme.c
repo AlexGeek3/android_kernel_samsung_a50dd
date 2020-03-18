@@ -10,7 +10,10 @@
 #include "sap_mlme.h"
 #include "hip.h"
 #include "mgt.h"
+
+#ifdef CONFIG_ANDROID
 #include "scsc_wifilogger_rings.h"
+#endif
 #include "nl80211_vendor.h"
 #include "mlme.h"
 
@@ -35,6 +38,10 @@ static int sap_mlme_notifier(struct slsi_dev *sdev, unsigned long event)
 #ifdef CONFIG_SLSI_WLAN_STA_FWD_BEACON
 	struct net_device *dev;
 #endif
+#ifdef CONFIG_SCSC_WLAN_SILENT_RECOVERY
+	bool vif_type_ap = false;
+	int level;
+#endif
 	struct netdev_vif *ndev_vif;
 
 	SLSI_INFO_NODEV("Notifier event received: %lu\n", event);
@@ -45,24 +52,53 @@ static int sap_mlme_notifier(struct slsi_dev *sdev, unsigned long event)
 	case SCSC_WIFI_STOP:
 		/* Stop sending signals down*/
 		sdev->mlme_blocked = true;
-		SLSI_INFO_NODEV("MLME BLOCKED\n");
-
 		/* cleanup all the VIFs and scan data */
 		SLSI_MUTEX_LOCK(sdev->netdev_add_remove_mutex);
+#ifdef CONFIG_SCSC_WLAN_SILENT_RECOVERY
+		level = atomic_read(&sdev->cm_if.reset_level);
+		SLSI_INFO_NODEV("MLME BLOCKED system error level:%d\n", level);
+#endif
 		complete_all(&sdev->sig_wait.completion);
+		/*WLAN system down actions*/
 		for (i = 1; i <= CONFIG_SCSC_WLAN_MAX_INTERFACES; i++)
 			if (sdev->netdev[i]) {
 				ndev_vif = netdev_priv(sdev->netdev[i]);
+				complete_all(&ndev_vif->sig_wait.completion);
 				slsi_scan_cleanup(sdev, sdev->netdev[i]);
+#ifdef CONFIG_SCSC_WLAN_SILENT_RECOVERY
+/* For level8 use the older panic flow */
+				if (level < SLSI_WIFI_CM_IF_SYSTEM_ERROR_PANIC && ndev_vif->vif_type == FAPI_VIFTYPE_AP)
+					vif_type_ap = true;
+#endif
 				SLSI_MUTEX_LOCK(ndev_vif->vif_mutex);
 				slsi_vif_cleanup(sdev, sdev->netdev[i], 0);
+#ifdef CONFIG_SCSC_WLAN_SILENT_RECOVERY
+				if (level < SLSI_WIFI_CM_IF_SYSTEM_ERROR_PANIC && vif_type_ap)
+					ndev_vif->vif_type = FAPI_VIFTYPE_AP;
+#endif
 				SLSI_MUTEX_UNLOCK(ndev_vif->vif_mutex);
 			}
+#ifdef CONFIG_SCSC_WLAN_SILENT_RECOVERY
+			if (level < SLSI_WIFI_CM_IF_SYSTEM_ERROR_PANIC)
+				sdev->device_state = SLSI_DEVICE_STATE_STOPPING;
+			if (sdev->netdev_up_count == 0)
+				sdev->mlme_blocked = false;
+#endif
 		SLSI_MUTEX_UNLOCK(sdev->netdev_add_remove_mutex);
 		SLSI_INFO_NODEV("Force cleaned all VIFs\n");
 		break;
 
 	case SCSC_WIFI_FAILURE_RESET:
+#ifdef CONFIG_SCSC_WLAN_SILENT_RECOVERY
+		level = atomic_read(&sdev->cm_if.reset_level);
+		if (level < SLSI_WIFI_CM_IF_SYSTEM_ERROR_PANIC || sdev->require_service_close) {
+			SLSI_INFO(sdev, "remove work queue!!");
+			queue_work(sdev->device_wq, &sdev->recovery_work_on_stop);
+		}
+#else
+		if (sdev->require_service_close)
+			queue_work(sdev->device_wq, &sdev->recovery_work_on_stop);
+#endif
 		break;
 
 	case SCSC_WIFI_SUSPEND:
@@ -74,9 +110,9 @@ static int sap_mlme_notifier(struct slsi_dev *sdev, unsigned long event)
 		ndev_vif = netdev_priv(dev);
 		SLSI_MUTEX_LOCK(ndev_vif->vif_mutex);
 
-		if ((ndev_vif->is_wips_running) && (ndev_vif->activated) &&
-		    (ndev_vif->vif_type == FAPI_VIFTYPE_STATION) &&
-		    (ndev_vif->sta.vif_status == SLSI_VIF_STATUS_CONNECTED)) {
+		if (ndev_vif->is_wips_running && ndev_vif->activated &&
+		    ndev_vif->vif_type == FAPI_VIFTYPE_STATION &&
+		    ndev_vif->sta.vif_status == SLSI_VIF_STATUS_CONNECTED) {
 			ndev_vif->is_wips_running = false;
 
 			slsi_send_forward_beacon_abort_vendor_event(sdev, SLSI_FORWARD_BEACON_ABORT_REASON_SUSPENDED);
@@ -86,7 +122,17 @@ static int sap_mlme_notifier(struct slsi_dev *sdev, unsigned long event)
 		SLSI_MUTEX_UNLOCK(ndev_vif->vif_mutex);
 #endif
 		break;
-
+#ifdef CONFIG_SCSC_WLAN_SILENT_RECOVERY
+	case SCSC_WIFI_SUBSYSTEM_RESET:
+		/*wlan system down actions*/
+		queue_work(sdev->device_wq, &sdev->recovery_work);
+		break;
+	case SCSC_WIFI_CHIP_READY:
+		level = atomic_read(&sdev->cm_if.reset_level);
+		if (level < SLSI_WIFI_CM_IF_SYSTEM_ERROR_PANIC && sdev->netdev_up_count != 0)
+			queue_work(sdev->device_wq, &sdev->recovery_work_on_start);
+		break;
+#endif
 	default:
 		SLSI_INFO_NODEV("Unknown event code %lu\n", event);
 		break;
@@ -171,7 +217,8 @@ static int slsi_rx_netdev_mlme(struct slsi_dev *sdev, struct net_device *dev, st
 		slsi_rx_channel_switched_ind(sdev, dev, skb);
 		break;
 	case MLME_AC_PRIORITY_UPDATE_IND:
-		SLSI_DBG1(sdev, SLSI_MLME, "Unexpected MLME_AC_PRIORITY_UPDATE_IND\n");
+		SLSI_DBG1(sdev, SLSI_MLME,
+			  "Unexpected MLME_AC_PRIORITY_UPDATE_IND\n");
 		slsi_kfree_skb(skb);
 		break;
 #ifdef CONFIG_SCSC_WLAN_GSCAN_ENABLE
@@ -184,29 +231,36 @@ static int slsi_rx_netdev_mlme(struct slsi_dev *sdev, struct net_device *dev, st
 	case MLME_RANGE_DONE_IND:
 		slsi_rx_range_done_ind(sdev, dev, skb);
 		break;
-
-#endif
 	case MLME_EVENT_LOG_IND:
 		slsi_rx_event_log_indication(sdev, dev, skb);
 		break;
+#endif
 #ifdef CONFIG_SCSC_WIFI_NAN_ENABLE
 	case MLME_NAN_EVENT_IND:
 		slsi_nan_event(sdev, dev, skb);
-		slsi_kfree_skb(skb);
 		break;
 	case MLME_NAN_FOLLOWUP_IND:
 		slsi_nan_followup_ind(sdev, dev, skb);
-		slsi_kfree_skb(skb);
 		break;
 	case MLME_NAN_SERVICE_IND:
 		slsi_nan_service_ind(sdev, dev, skb);
-		slsi_kfree_skb(skb);
+		break;
+	case MLME_NDP_REQUEST_IND:
+		slsi_nan_ndp_setup_ind(sdev, dev, skb, true);
+		break;
+	case MLME_NDP_REQUESTED_IND:
+		slsi_nan_ndp_requested_ind(sdev, dev, skb);
+		break;
+	case MLME_NDP_RESPONSE_IND:
+		slsi_nan_ndp_setup_ind(sdev, dev, skb, false);
+		break;
+	case MLME_NDP_TERMINATED_IND:
+		slsi_nan_ndp_termination_ind(sdev, dev, skb);
 		break;
 #endif
 #ifdef CONFIG_SCSC_WLAN_SAE_CONFIG
 	case MLME_SYNCHRONISED_IND:
 		slsi_rx_synchronised_ind(sdev, dev, skb);
-		slsi_kfree_skb(skb);
 		break;
 #endif
 #ifdef CONFIG_SLSI_WLAN_STA_FWD_BEACON
@@ -288,9 +342,8 @@ static int slsi_rx_action_enqueue_netdev_mlme(struct slsi_dev *sdev, struct sk_b
 
 	if (ndev_vif->iftype == NL80211_IFTYPE_P2P_GO || ndev_vif->iftype == NL80211_IFTYPE_P2P_CLIENT) {
 		struct ieee80211_mgmt *mgmt = fapi_get_mgmt(skb);
-		/*  Check the DA of received action frame with the GO interface address */
+		/*  DA of action frame is GO interface address?*/
 		if (memcmp(mgmt->da, dev->dev_addr, ETH_ALEN) != 0) {
-			/* If not equal, compare DA of received action frame with the P2P DEV address*/
 			struct net_device *p2pdev = slsi_get_netdev_rcu(sdev, SLSI_NET_INDEX_P2P);
 
 			if (WARN_ON(!p2pdev)) {
@@ -298,8 +351,9 @@ static int slsi_rx_action_enqueue_netdev_mlme(struct slsi_dev *sdev, struct sk_b
 				return -ENODEV;
 			}
 			if (memcmp(mgmt->da, p2pdev->dev_addr, ETH_ALEN) == 0) {
-				/* If destination address is equal to P2P DEV ADDR, then action frame is received on
-				 * GO interface. Hence indicate action frames on P2P DEV
+				/* If destination address is P2P DEV ADDR, then
+				 * action frame is received on GO interface.
+				 * Hence indicate action frames on P2P DEV
 				 */
 				ndev_vif = netdev_priv(p2pdev);
 
@@ -327,7 +381,9 @@ static int sap_mlme_rx_handler(struct slsi_dev *sdev, struct sk_buff *skb)
 		return 0;
 
 	if (fapi_is_ind(skb)) {
+#ifdef CONFIG_SCSC_WIFILOGGER
 		SCSC_WLOG_PKTFATE_LOG_RX_CTRL_FRAME(fapi_get_data(skb), fapi_get_datalen(skb));
+#endif
 
 		switch (fapi_get_sigid(skb)) {
 		case MLME_SCAN_DONE_IND:
@@ -348,15 +404,21 @@ static int sap_mlme_rx_handler(struct slsi_dev *sdev, struct sk_buff *skb)
 			return slsi_rx_enqueue_netdev_mlme(sdev, skb,  (scan_id >> 8));
 		case MLME_RECEIVED_FRAME_IND:
 			if (vif == 0) {
-				SLSI_WARN(sdev, "Received MLME_RECEIVED_FRAME_IND on VIF 0\n");
+				SLSI_WARN(sdev, "MLME_RECEIVED_FRAME_IND VIF 0\n");
 				goto err;
 			}
 			return slsi_rx_action_enqueue_netdev_mlme(sdev, skb, vif);
 #ifdef CONFIG_SCSC_WLAN_GSCAN_ENABLE
+#ifdef CONFIG_SCSC_WIFI_NAN_ENABLE
 		case MLME_NAN_EVENT_IND:
 		case MLME_NAN_FOLLOWUP_IND:
 		case MLME_NAN_SERVICE_IND:
+		case MLME_NDP_REQUEST_IND:
+		case MLME_NDP_REQUESTED_IND:
+		case MLME_NDP_RESPONSE_IND:
+		case MLME_NDP_TERMINATED_IND:
 			return slsi_rx_enqueue_netdev_mlme(sdev, skb, vif);
+#endif
 		case MLME_RANGE_IND:
 		case MLME_RANGE_DONE_IND:
 			if (vif == 0)
@@ -368,6 +430,32 @@ static int sap_mlme_rx_handler(struct slsi_dev *sdev, struct sk_buff *skb)
 		case MLME_EVENT_LOG_IND:
 			return slsi_rx_enqueue_netdev_mlme(sdev, skb, SLSI_NET_INDEX_WLAN);
 #endif
+		case MLME_ROAMED_IND:
+			if (vif == 0) {
+				SLSI_WARN(sdev, "MLME_ROAMED_IND VIF 0\n");
+				goto err;
+			} else {
+				struct net_device *dev;
+				struct netdev_vif *ndev_vif;
+
+				rcu_read_lock();
+				dev = slsi_get_netdev_rcu(sdev, vif);
+				if (WARN_ON(!dev)) {
+					rcu_read_unlock();
+					return -ENODEV;
+				}
+				ndev_vif = netdev_priv(dev);
+				if (atomic_read(&ndev_vif->sta.drop_roamed_ind)) {
+					/* If roam cfm is not received for the
+					 * req, ignore this roamed indication.
+					 */
+					slsi_kfree_skb(skb);
+					rcu_read_unlock();
+					return 0;
+				}
+				rcu_read_unlock();
+				return slsi_rx_enqueue_netdev_mlme(sdev, skb, vif);
+			}
 		default:
 			if (vif == 0) {
 				SLSI_WARN(sdev, "Received signal 0x%04x on VIF 0, return error\n", fapi_get_sigid(skb));

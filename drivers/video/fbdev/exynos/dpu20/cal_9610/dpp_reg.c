@@ -930,6 +930,8 @@ void dpp_reg_init(u32 id, const unsigned long attr)
 		idma_reg_set_in_qos_lut(id, 1, 0x44444444);
 		idma_reg_set_dynamic_gating_en_all(id, 0);
 		idma_reg_set_out_frame_alpha(id, 0xFF);
+		/* to prevent irq storm that may occur in the OFF STATE */
+		idma_reg_clear_irq(id, IDMA_ALL_IRQ_CLEAR);
 	}
 
 	if (test_bit(DPP_ATTR_DPP, &attr)) {
@@ -938,6 +940,8 @@ void dpp_reg_init(u32 id, const unsigned long attr)
 		dpp_reg_set_clock_gate_en_all(id, 0);
 		dpp_reg_set_dynamic_gating_en_all(id, 0);
 		dpp_reg_set_linecnt(id, 1);
+		/* to prevent irq storm that may occur in the OFF STATE */
+		dpp_reg_clear_irq(id, DPP_ALL_IRQ_CLEAR);
 	}
 
 	if (test_bit(DPP_ATTR_ODMA, &attr)) {
@@ -951,6 +955,8 @@ void dpp_reg_init(u32 id, const unsigned long attr)
 		wb_mux_reg_set_clock_gate_en_all(id, 1);
 		wb_mux_reg_set_dynamic_gating_en_all(id, 0); /* TODO: enable or disable ? */
 		wb_mux_reg_set_out_frame_alpha(id, 0xFF);
+		/* to prevent irq storm that may occur in the OFF STATE */
+		odma_reg_clear_irq(id, ODMA_ALL_IRQ_CLEAR);
 	}
 }
 

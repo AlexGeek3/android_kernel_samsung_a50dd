@@ -20,6 +20,7 @@
 #include "mifproc.h"
 #include "mxman.h"
 #include "mxproc.h"
+#include "mxsyserr.h"
 #include "srvman.h"
 #include "mxmgmt_transport.h"
 #include "gdb_transport.h"
@@ -54,6 +55,9 @@ struct scsc_mx {
 	struct mxmgmt_transport mxmgmt_transport;
 	struct gdb_transport    gdb_transport_r4;
 	struct gdb_transport    gdb_transport_m4;
+#ifdef CONFIG_SCSC_MX450_GDB_SUPPORT
+	struct gdb_transport    gdb_transport_m4_1;
+#endif
 	int                     users;
 	struct mxlog            mxlog;
 	struct mxlogger         mxlogger;
@@ -84,6 +88,7 @@ struct scsc_mx *scsc_mx_create(struct scsc_mif_abs *mif)
 #ifdef CONFIG_SCSC_WLBTD
 	scsc_wlbtd_init();
 #endif
+	mx_syserr_init();
 	SCSC_TAG_DEBUG(MXMAN, "Hurray Maxwell is here with %p\n", mx);
 	return mx;
 }
@@ -182,6 +187,13 @@ struct gdb_transport *scsc_mx_get_gdb_transport_m4(struct scsc_mx *mx)
 {
 	return &mx->gdb_transport_m4;
 }
+
+#ifdef CONFIG_SCSC_MX450_GDB_SUPPORT
+struct gdb_transport *scsc_mx_get_gdb_transport_m4_1(struct scsc_mx *mx)
+{
+	return &mx->gdb_transport_m4_1;
+}
+#endif
 
 struct mxlog *scsc_mx_get_mxlog(struct scsc_mx *mx)
 {

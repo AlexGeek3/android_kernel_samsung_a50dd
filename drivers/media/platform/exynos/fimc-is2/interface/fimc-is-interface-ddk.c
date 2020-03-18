@@ -357,6 +357,7 @@ static void fimc_is_lib_camera_callback(void *this, enum lib_cb_event_type event
 	struct fimc_is_framemgr *framemgr;
 	struct fimc_is_frame *frame;
 	ulong flags = 0;
+	struct lib_callback_result *cb_result = NULL;
 
 	FIMC_BUG_VOID(!this);
 
@@ -371,9 +372,15 @@ static void fimc_is_lib_camera_callback(void *this, enum lib_cb_event_type event
 		return;
 	}
 
+	if (IS_ENABLED(CHAIN_USE_STRIPE_PROCESSING) && data) {
+		cb_result = (struct lib_callback_result *)data;
+		fcount = (ulong)cb_result->fcount;
+	} else {
+		fcount = (ulong)data;
+	}
+
 	switch (event_id) {
 	case LIB_EVENT_CONFIG_LOCK:
-		fcount = (ulong)data;
 		atomic_add(hw_ip->num_buffers, &hw_ip->count.cl);
 		if (unlikely(!atomic_read(&hardware->streaming[hardware->sensor_position[instance_id]])))
 			msinfo_hw("[F:%d]C.L %d\n", instance_id, hw_ip,
@@ -448,7 +455,6 @@ static void fimc_is_lib_camera_callback(void *this, enum lib_cb_event_type event
 				hw_ip->debug_info[index].time[DEBUG_POINT_FRAME_START]) / 1000);
 		}
 
-		fcount = (ulong)data;
 		fimc_is_hw_g_ctrl(hw_ip, hw_ip->id, HW_G_CTRL_FRM_DONE_WITH_DMA, (void *)&frame_done);
 		if (frame_done)
 			ret = check_dma_done(hw_ip, instance_id, (u32)fcount);
@@ -483,7 +489,7 @@ static void fimc_is_lib_camera_callback(void *this, enum lib_cb_event_type event
 			}
 		} else {
 			serr_hw("[F:%lu]camera_callback: frame(null)!!(E%d)", hw_ip,
-				(ulong)data, event_id);
+				fcount, event_id);
 		}
 
 		atomic_set(&hw_ip->status.Vvalid, V_BLANK);
@@ -714,16 +720,16 @@ int fimc_is_lib_isp_set_ctrl(struct fimc_is_hw_ip *hw_ip,
 	return 0;
 }
 
-void fimc_is_lib_isp_shot(struct fimc_is_hw_ip *hw_ip,
+int fimc_is_lib_isp_shot(struct fimc_is_hw_ip *hw_ip,
 	struct fimc_is_lib_isp *this, void *param_set, struct camera2_shot *shot)
 {
 	int ret = 0;
 
-	FIMC_BUG_VOID(!hw_ip);
-	FIMC_BUG_VOID(!this);
-	FIMC_BUG_VOID(!param_set);
-	FIMC_BUG_VOID(!this->func);
-	FIMC_BUG_VOID(!this->object);
+	FIMC_BUG(!hw_ip);
+	FIMC_BUG(!this);
+	FIMC_BUG(!param_set);
+	FIMC_BUG(!this->func);
+	FIMC_BUG(!this->object);
 
 	switch (hw_ip->id) {
 	case DEV_HW_3AA0:
@@ -762,6 +768,8 @@ void fimc_is_lib_isp_shot(struct fimc_is_hw_ip *hw_ip,
 		err_lib("invalid hw (%d)", hw_ip->id);
 		break;
 	}
+
+	return ret;
 }
 
 int fimc_is_lib_isp_get_meta(struct fimc_is_hw_ip *hw_ip,

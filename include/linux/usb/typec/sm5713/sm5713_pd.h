@@ -725,8 +725,8 @@ struct sm5713_usbpd_manager_data {
 	bool uvdm_dir;
 	wait_queue_head_t	uvdm_in_wq;
 	wait_queue_head_t	uvdm_out_wq;
-	int uvdm_in_busy;
-	int uvdm_out_busy;
+	int uvdm_in_ok;
+	int uvdm_out_ok;
 	bool pn_flag;
 	int alt_sended;
 	uint16_t Standard_Vendor_ID;
@@ -743,6 +743,9 @@ struct sm5713_usbpd_manager_data {
 	struct sm5713_usbpd_data *pd_data;
 	struct delayed_work	acc_detach_handler;
 	struct delayed_work	new_power_handler;
+#if defined(CONFIG_SEC_FACTORY)
+	int vbus_adc;
+#endif
 };
 
 struct sm5713_usbpd_data {

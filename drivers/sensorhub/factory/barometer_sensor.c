@@ -12,6 +12,7 @@
  *  GNU General Public License for more details.
  *
  */
+#include <linux/slab.h>
 #include "../ssp.h"
 #include "../sensors_core.h"
 #include "../ssp_data.h"

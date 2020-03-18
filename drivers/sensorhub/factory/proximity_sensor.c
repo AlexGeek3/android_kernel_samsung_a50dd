@@ -1,3 +1,4 @@
+#include <linux/slab.h>
 #include "../ssp.h"
 #include "../sensors_core.h"
 #include "../ssp_data.h"
@@ -223,28 +224,126 @@ static ssize_t barcode_emul_enable_store(struct device *dev,
 	return size;
 }
 
-#if defined(CONFIG_SSP_ENG_DEBUG)
-static ssize_t proximity_setting_show(struct device *dev,
-                                      struct device_attribute *attr, char *buf)
-{
-	struct ssp_data *data = dev_get_drvdata(dev);
-	if(data->proximity_ops == NULL || data->proximity_ops->get_proximity_setting == NULL)
-		return -EINVAL;
-	return data->proximity_ops->get_proximity_setting(buf);
-}
-
-static ssize_t proximity_setting_store(struct device *dev,
+#if defined(CONFIG_SENSROS_SSP_PROXIMITY_THRESH_CAL)
+static ssize_t proximity_cal_store(struct device *dev,
                                        struct device_attribute *attr, const char *buf, size_t size)
 {
 	struct ssp_data *data = dev_get_drvdata(dev);
 	int ret = 0;
 
-	if(data->proximity_ops == NULL || data->proximity_ops->set_proximity_setting == NULL)
+	if(data->proximity_ops == NULL || data->proximity_ops->set_proximity_calibration == NULL)
 		return -EINVAL;
-	ret = data->proximity_ops->set_proximity_setting(data, buf);
+	ret = data->proximity_ops->set_proximity_calibration(data, buf);
 	if (ret < 0) {
 		ssp_errf("- failed = %d", ret);
 	}
+	return size;
+}	
+
+static ssize_t proximity_offset_pass_show(struct device *dev,
+                                      struct device_attribute *attr, char *buf)
+{
+	struct ssp_data *data = dev_get_drvdata(dev);
+	if(data->proximity_ops == NULL || data->proximity_ops->get_proximity_calibration_result == NULL)
+		return -EINVAL;
+	return data->proximity_ops->get_proximity_calibration_result(buf);
+}
+#endif
+
+#ifdef CONFIG_SENSORS_SSP_PROXIMITY_MODIFY_SETTINGS
+static ssize_t proximity_modify_settings_show(struct device *dev,
+                                        struct device_attribute *attr, char *buf)
+{
+	struct ssp_data *data = dev_get_drvdata(dev);
+
+	open_proximity_setting_mode(data);
+	return snprintf(buf, PAGE_SIZE, "%d\n", data->prox_setting_mode);
+}
+
+static ssize_t proximity_modify_settings_store(struct device *dev,
+                                         struct device_attribute *attr, const char *buf, size_t size)
+{
+	struct ssp_data *data = dev_get_drvdata(dev);
+	int ret = 0;
+	u8 temp;
+
+	pr_info("[SSP] %s - %s\n", __func__, buf);
+
+	ret = kstrtou8(buf, 10, &temp);
+	if (ret < 0) {
+		return ret;
+	}
+
+	if(temp == 1)
+		data->prox_setting_mode = 1;
+	else if(temp == 2)
+	{
+		data->prox_setting_mode = 2;
+		memcpy(data->prox_thresh, data->prox_mode_thresh, sizeof(data->prox_thresh));
+	}
+	else 
+	{
+		ssp_errf("invalid value %d", temp);
+		return -EINVAL;
+	}
+
+	ssp_infof("prox_setting %d", temp);
+
+	save_proximity_setting_mode(data);
+	return size;
+}
+
+static ssize_t proximity_settings_thresh_high_show(struct device *dev,
+                                        struct device_attribute *attr, char *buf)
+{
+	struct ssp_data *data = dev_get_drvdata(dev);
+	return snprintf(buf, PAGE_SIZE, "%d\n", data->prox_setting_thresh[0]);
+}
+
+static ssize_t proximity_settings_thresh_high_store(struct device *dev,
+                                         struct device_attribute *attr, const char *buf, size_t size)
+{
+	struct ssp_data *data = dev_get_drvdata(dev);
+	int ret;
+	u16 settings_thresh;
+	
+	ret = kstrtou16(buf, 10, &settings_thresh);
+	if (ret < 0) {
+		ssp_errf("kstrto16 failed.(%d)", ret);
+		return -EINVAL;
+	} else {
+			data->prox_setting_thresh[0] = settings_thresh;
+	}
+
+	ssp_infof("new prox setting high threshold %u", data->prox_setting_thresh[0]);
+	
+	return size;
+}
+
+static ssize_t proximity_settings_thresh_low_show(struct device *dev,
+                                        struct device_attribute *attr, char *buf)
+{
+	struct ssp_data *data = dev_get_drvdata(dev);
+	return snprintf(buf, PAGE_SIZE, "%d\n", data->prox_setting_thresh[1]);
+}
+
+static ssize_t proximity_settings_thresh_low_store(struct device *dev,
+                                         struct device_attribute *attr, const char *buf, size_t size)
+{
+	struct ssp_data *data = dev_get_drvdata(dev);
+	int ret;
+	u16 settings_thresh;
+	
+	ret = kstrtou16(buf, 10, &settings_thresh);
+	if (ret < 0) {
+		ssp_errf("kstrto16 failed.(%d)", ret);
+		return -EINVAL;
+	} else {
+			data->prox_setting_thresh[1] = settings_thresh;
+	}
+
+	ssp_infof("new prox setting low threshold %u", data->prox_setting_thresh[1]);
+	
 	return size;
 }
 #endif
@@ -274,12 +373,25 @@ static DEVICE_ATTR(prox_avg, S_IRUGO | S_IWUSR | S_IWGRP,
 static DEVICE_ATTR(barcode_emul_en, S_IRUGO | S_IWUSR | S_IWGRP,
                    barcode_emul_enable_show, barcode_emul_enable_store);
 
-#if defined(CONFIG_SSP_ENG_DEBUG)
-static DEVICE_ATTR(setting, S_IRUGO | S_IWUSR | S_IWGRP,
-                   proximity_setting_show, proximity_setting_store);
-#endif
 #if defined(CONFIG_SENSORS_SSP_PROXIMITY_AUTO_CAL_TMD3725)
 static DEVICE_ATTR(prox_trim_check, S_IRUGO, proximity_default_trim_check_show, NULL);
+#endif
+
+#if defined(CONFIG_SENSROS_SSP_PROXIMITY_THRESH_CAL)
+static DEVICE_ATTR(prox_cal, S_IWUSR | S_IWGRP,
+                   NULL, proximity_cal_store);
+
+static DEVICE_ATTR(prox_offset_pass, S_IRUGO,
+                   proximity_offset_pass_show, NULL);
+#endif
+
+#ifdef CONFIG_SENSORS_SSP_PROXIMITY_MODIFY_SETTINGS
+static DEVICE_ATTR(modify_settings, S_IRUGO | S_IWUSR | S_IWGRP,
+                   proximity_modify_settings_show, proximity_modify_settings_store);
+static DEVICE_ATTR(settings_thd_high, S_IRUGO | S_IWUSR | S_IWGRP,
+                   proximity_settings_thresh_high_show, proximity_settings_thresh_high_store);
+static DEVICE_ATTR(settings_thd_low, S_IRUGO | S_IWUSR | S_IWGRP,
+                   proximity_settings_thresh_low_show, proximity_settings_thresh_low_store);
 #endif
 
 static struct device_attribute *prox_attrs[] = {
@@ -296,11 +408,17 @@ static struct device_attribute *prox_attrs[] = {
 	&dev_attr_raw_data,
 	&dev_attr_prox_avg,
 	&dev_attr_barcode_emul_en,
-#if defined(CONFIG_SSP_ENG_DEBUG)
-	&dev_attr_setting,
-#endif
 #if defined(CONFIG_SENSORS_SSP_PROXIMITY_AUTO_CAL_TMD3725)
 	&dev_attr_prox_trim_check,
+#endif
+#if defined(CONFIG_SENSROS_SSP_PROXIMITY_THRESH_CAL)
+	&dev_attr_prox_cal,
+	&dev_attr_prox_offset_pass,
+#endif
+#if defined(CONFIG_SENSORS_SSP_PROXIMITY_MODIFY_SETTINGS)
+	&dev_attr_modify_settings,
+	&dev_attr_settings_thd_high,
+	&dev_attr_settings_thd_low,
 #endif
 	NULL,
 };
@@ -321,6 +439,9 @@ void select_prox_ops(struct ssp_data *data)
 #if defined(CONFIG_SENSORS_SSP_PROXIMITY_STK3X3X)
 	count++;
 #endif
+#if defined(CONFIG_SENSORS_SSP_PROXIMITY_GP2AP110S)
+	count++;
+#endif
 
 	if(count == 0)
 	{
@@ -336,6 +457,9 @@ void select_prox_ops(struct ssp_data *data)
 #endif
 #if defined(CONFIG_SENSORS_SSP_PROXIMITY_STK3X3X)
 	prox_ops_ary[i++] = get_proximity_stk3x3x_function_pointer(data);
+#endif
+#if defined(CONFIG_SENSORS_SSP_PROXIMITY_GP2AP110S)
+	prox_ops_ary[i++] = get_proximity_gp2ap110s_function_pointer(data);
 #endif
 
 	if(count > 1) {
@@ -371,6 +495,8 @@ void initialize_prox_factorytest(struct ssp_data *data)
 	data->proximity_ops = get_proximity_ams_auto_cal_function_pointer(data);
 #elif defined(CONFIG_SENSORS_SSP_PROXIMITY_STK3X3X)
 	data->proximity_ops = get_proximity_stk3x3x_function_pointer(data);
+#elif defined(CONFIG_SENSORS_SSP_PROXIMITY_GP2AP110S)
+	data->proximity_ops = get_proximity_gp2ap110s_function_pointer(data);
 #endif
 
 	sensors_register(data->devices[SENSOR_TYPE_PROXIMITY], data,

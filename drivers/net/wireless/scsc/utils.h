@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- * Copyright (c) 2012 - 2018 Samsung Electronics Co., Ltd. All rights reserved
+ * Copyright (c) 2012 - 2019 Samsung Electronics Co., Ltd. All rights reserved
  *
  *****************************************************************************/
 
@@ -13,8 +13,8 @@
 #include <linux/workqueue.h>
 #include <linux/skbuff.h>
 #include <net/cfg80211.h>
-#include <netif.h>
 
+#include "netif.h"
 #include "wakelock.h"
 #ifdef CONFIG_SCSC_SMAPPER
 struct slsi_skb_cb {
@@ -53,6 +53,21 @@ static inline u32  slsi_convert_tlv_data_to_value(u8 *data, u16 length)
 	return value;
 }
 
+static inline int slsi_get_two_compliment(u32 value)
+{
+	int no_bits = 0;
+	u32 roam_rssi = value;
+	int ret = 0;
+
+	while (roam_rssi) {
+		no_bits++;
+		roam_rssi >>= 1;
+	}
+	ret = ((1 << no_bits) - 1) ^ value;
+	ret = -(ret + 1);
+	return ret;
+}
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -67,8 +82,7 @@ extern "C" {
 
 extern uint slsi_sg_host_align_mask;
 #define SLSI_HIP_FH_SIG_PREAMBLE_LEN 4
-#define SLSI_SKB_GET_ALIGNMENT_OFFSET(skb) (offset_in_page(skb->data + SLSI_NETIF_SKB_HEADROOM - SLSI_HIP_FH_SIG_PREAMBLE_LEN) \
-					    & slsi_sg_host_align_mask)
+#define SLSI_SKB_GET_ALIGNMENT_OFFSET(skb) (0)
 
 /* Get the Compiler to ignore Unused parameters */
 #define SLSI_UNUSED_PARAMETER(x) ((void)(x))
@@ -103,7 +117,7 @@ extern uint slsi_sg_host_align_mask;
 	} while (0)
 
 /*------------------------------------------------------------------*/
-/* Endian conversion */
+/* Endian conversion. */
 /*------------------------------------------------------------------*/
 #define SLSI_BUFF_LE_TO_U16(ptr)        (((u16)((u8 *)(ptr))[0]) | ((u16)((u8 *)(ptr))[1]) << 8)
 #define SLSI_U16_TO_BUFF_LE(uint, ptr) \
@@ -647,6 +661,175 @@ static inline u32 slsi_get_center_freq1(struct slsi_dev *sdev, u16 chann_info, u
 		break;
 	}
 	return center_freq1;
+}
+
+/* Name: strtoint
+ * Desc: Converts a string to a decimal or hexadecimal integer
+ * s: the string to be converted
+ * res: pointer to the calculated integer
+ * return: 0 (success), 1(failure)
+ */
+static inline int strtoint(const char *s, int *res)
+{
+	int base = 10;
+
+	if (strlen(s) > 2)
+		if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X'))
+			base = 16;
+	return kstrtoint(s, base, res);
+}
+
+static inline u8 *slsi_mem_dup(u8 *src, size_t len)
+{
+	u8 *dest;
+
+	dest = kmalloc(len, GFP_KERNEL);
+	if (!dest)
+		return NULL;
+	memcpy(dest, src, len);
+	return dest;
+}
+
+static inline void slsi_get_random_bytes(u8 *byte_buffer, u32 buffer_len)
+{
+	return get_random_bytes(byte_buffer, buffer_len);
+}
+
+static inline int slsi_util_nla_get_u8(const struct nlattr *attr, u8 *val)
+{
+	if (nla_len(attr) >= sizeof(u8)) {
+		*val = nla_get_u8(attr);
+		return 0;
+	}
+	return -EINVAL;
+}
+
+static inline int slsi_util_nla_get_u16(const struct nlattr *attr, u16 *val)
+{
+	if (nla_len(attr) >= sizeof(u16)) {
+		*val = nla_get_u16(attr);
+		return 0;
+	}
+	return -EINVAL;
+
+}
+
+static inline int slsi_util_nla_get_u32(const struct nlattr *attr, u32 *val)
+{
+	if (nla_len(attr) >= sizeof(u32)) {
+		*val = nla_get_u32(attr);
+		return 0;
+	}
+	return -EINVAL;
+}
+
+static inline int slsi_util_nla_get_u64(const struct nlattr *attr, u64 *val)
+{
+	if (nla_len(attr) >= sizeof(u64)) {
+		*val = nla_get_u64(attr);
+		return 0;
+	}
+	return -EINVAL;
+}
+
+
+static inline int slsi_util_nla_get_s8(const struct nlattr *attr, s8 *val)
+{
+	if (nla_len(attr) >= sizeof(s8)) {
+		*val = nla_get_s8(attr);
+		return 0;
+	}
+	return -EINVAL;
+}
+
+static inline int slsi_util_nla_get_s16(const struct nlattr *attr, s16 *val)
+{
+	if (nla_len(attr) >= sizeof(s16)) {
+		*val = nla_get_s16(attr);
+		return 0;
+	}
+	return -EINVAL;
+}
+
+static inline int slsi_util_nla_get_s32(const struct nlattr *attr, s32 *val)
+{
+	if (nla_len(attr) >= sizeof(s32)) {
+		*val = nla_get_s32(attr);
+		return 0;
+	}
+	return -EINVAL;
+}
+
+static inline int slsi_util_nla_get_s64(const struct nlattr *attr, s64 *val)
+{
+	if (nla_len(attr) >= sizeof(s64)) {
+		*val = nla_get_s64(attr);
+		return 0;
+	}
+	return -EINVAL;
+}
+
+static inline int slsi_util_nla_get_be16(const struct nlattr *attr, __be16 *val)
+{
+	if (nla_len(attr) >= sizeof(__be16)) {
+		*val = nla_get_be16(attr);
+		return 0;
+	}
+	return -EINVAL;
+}
+
+static inline int slsi_util_nla_get_be32(const struct nlattr *attr, __be32 *val)
+{
+	if (nla_len(attr) >= sizeof(__be32)) {
+		*val = nla_get_be32(attr);
+		return 0;
+	}
+	return -EINVAL;
+}
+
+static inline int slsi_util_nla_get_be64(const struct nlattr *attr, __be64 *val)
+{
+	if (nla_len(attr) >= sizeof(__be64)) {
+		*val = nla_get_be64(attr);
+		return 0;
+	}
+	return -EINVAL;
+}
+
+static inline int slsi_util_nla_get_le16(const struct nlattr *attr,  __le16  *val)
+{
+	if (nla_len(attr) >= sizeof(__le16)) {
+		*val = nla_get_le16(attr);
+		return 0;
+	}
+	return -EINVAL;
+}
+
+static inline int slsi_util_nla_get_le32(const struct nlattr *attr, __le32 *val)
+{
+	if (nla_len(attr) >= sizeof(__le32)) {
+		*val = nla_get_le32(attr);
+		return 0;
+	}
+	return -EINVAL;
+}
+
+static inline int slsi_util_nla_get_le64(const struct nlattr *attr, __le64 *val)
+{
+	if (nla_len(attr) >= sizeof(__le64)) {
+		*val = nla_get_le64(attr);
+		return 0;
+	}
+	return -EINVAL;
+}
+
+static inline int slsi_util_nla_get_data(const struct nlattr *attr, size_t size, void *val)
+{
+	if(nla_len(attr) >= size) {
+		memcpy(val, nla_data(attr), size);
+		return 0;
+	}
+	return -EINVAL;
 }
 
 #ifdef __cplusplus

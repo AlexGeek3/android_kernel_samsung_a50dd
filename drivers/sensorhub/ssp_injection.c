@@ -44,12 +44,14 @@ static int ssp_inject_additional_info(struct ssp_data *data,
 {
 	int ret = 0;
 	char type;
-	int cur_level = 0;
-	int cal_brightness = 0;
 
 	type = buf[0];
+
+#ifdef CONFIG_SENSORS_SSP_LIGHT
 	if(type == SENSOR_TYPE_LIGHT)
 	{
+		int cur_level = 0;
+		int cal_brightness = 0;		
 		int32_t brightness;
 		if(count < 5) {
 			ssp_errf("brightness length error %d", count);
@@ -110,7 +112,8 @@ static int ssp_inject_additional_info(struct ssp_data *data,
 			report_camera_lux_data(data, data->camera_lux);
 		}
 	}
-	
+#endif
+
 	return ret;	
 }
 

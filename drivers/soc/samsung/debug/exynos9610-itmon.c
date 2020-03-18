@@ -1280,8 +1280,8 @@ static ssize_t itmon_timeout_fix_val_store(struct kobject *kobj,
 	unsigned long val = simple_strtoul(buf, NULL, 0);
 	struct itmon_platdata *pdata = g_itmon->pdata;
 
-	if (val > 0 && val <= 0xFFFFF)
-		pdata->sysfs_tmout_val = val;
+	if (val > 0UL && val <= 0xFFFFFUL)
+		pdata->sysfs_tmout_val = (unsigned int)val;
 
 	return count;
 }
@@ -1305,9 +1305,9 @@ static ssize_t itmon_scandump_store(struct kobject *kobj,
 	unsigned long val = simple_strtoul(buf, NULL, 0);
 	struct itmon_platdata *pdata = g_itmon->pdata;
 
-	if (val > 0 && val <= 0xFFFFF) {
+	if (val > 0UL && val <= 0xFFFFFUL) {
 		pdata = g_itmon->pdata;
-		pdata->sysfs_scandump = val;
+		pdata->sysfs_scandump = (unsigned int)val;
 	}
 
 	return count;

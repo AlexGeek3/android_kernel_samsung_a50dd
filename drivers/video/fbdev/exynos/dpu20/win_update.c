@@ -82,8 +82,8 @@ static void win_update_adjust_region(struct decon_device *decon,
 		sd = decon->dpp_sd[0];
 		v4l2_subdev_call(sd, core, ioctl, DPP_GET_RESTRICTION, &res);
 
-		min_src_w = res.src_f_w.min * sz_align;
-		min_src_h = res.src_f_h.min * sz_align;
+		min_src_w = max((res.src_f_w.min * sz_align), decon->lcd_info->update_min_w);
+		min_src_h = max((res.src_f_h.min * sz_align), decon->lcd_info->update_min_h);
 
 		if (decon->lcd_info->xres - r2.left < min_src_w)
 			r2.left = ((r1.left - min_src_w) / decon->win_up.rect_w) *
@@ -324,9 +324,8 @@ void dpu_prepare_win_update_config(struct decon_device *decon,
 #if defined(CONFIG_EXYNOS_DOZE)
 	struct decon_win_config *update_config = &win_config[DECON_WIN_UPDATE_IDX];
 
-	if ((decon->dt.out_type == DECON_OUT_DSI) && (decon->state == DECON_STATE_DOZE)) {
+	if (decon->dt.out_type == DECON_OUT_DSI && decon->state == DECON_STATE_DOZE)
 		memset(update_config, 0, sizeof(struct decon_win_config));
-	}
 #endif
 
 	if (!decon->win_up.enabled)
@@ -446,9 +445,6 @@ static int win_update_send_partial_command(struct dsim_device *dsim,
 
 	DPU_DEBUG_WIN("SET: [%d %d %d %d]\n", rect->left, rect->top,
 			rect->right - rect->left + 1, rect->bottom - rect->top + 1);
-
-	if (!dsim->priv.lcdconnected)
-		return 0;
 
 	column[0] = MIPI_DCS_SET_COLUMN_ADDRESS;
 	column[1] = (rect->left >> 8) & 0xff;
@@ -620,8 +616,8 @@ void dpu_init_win_update(struct decon_device *decon)
 		decon->win_up.rect_w = lcd->xres / lcd->dsc_slice_num;
 		decon->win_up.rect_h = lcd->dsc_slice_h;
 	} else {
-		decon->win_up.rect_w = res.src_f_w.min * sz_align;
-		decon->win_up.rect_h = res.src_f_h.min * sz_align;
+		decon->win_up.rect_w = max((res.src_f_w.min * sz_align), decon->lcd_info->update_min_w);
+		decon->win_up.rect_h = max((res.src_f_h.min * sz_align), decon->lcd_info->update_min_h);
 	}
 
 	DPU_FULL_RECT(&decon->win_up.prev_up_region, lcd);

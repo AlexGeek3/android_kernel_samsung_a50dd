@@ -1262,10 +1262,11 @@ extern struct super_block *odm_sb;	/* pointer to superblock */
 extern struct super_block *vendor_sb;	/* pointer to superblock */
 extern struct super_block *rootfs_sb;	/* pointer to superblock */
 extern int is_recovery;
+extern int __check_verifiedboot;
 
 static int kdp_check_sb_mismatch(struct super_block *sb) 
 {	
-	if(is_recovery) {
+	if(is_recovery || __check_verifiedboot) {
 		return 0;
 	}
 	if((sb != rootfs_sb) && (sb != sys_sb)
@@ -1919,7 +1920,7 @@ static int exec_binprm(struct linux_binprm *bprm)
 		ptrace_event(PTRACE_EVENT_EXEC, old_vpid);
 		proc_exec_connector(current);
 	} else {
-		task_integrity_delayed_reset(current);
+		task_integrity_delayed_reset(current, CAUSE_EXEC, bprm->file);
 	}
 
 	return ret;

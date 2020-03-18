@@ -715,6 +715,11 @@ struct sec_age_data {
 	struct sec_age_data
 #endif
 
+typedef struct {
+	unsigned int cycle;
+	unsigned int asoc;
+} battery_health_condition;
+
 struct sec_battery_platform_data {
 	/* NO NEED TO BE CHANGED */
 	/* callback functions */
@@ -998,6 +1003,8 @@ struct sec_battery_platform_data {
 	int age_data_length;
 	sec_age_data_t* age_data;
 #endif
+	battery_health_condition* health_condition;
+
 	unsigned int siop_event_check_type;
 	unsigned int siop_call_cc_current;
 	unsigned int siop_call_cv_current;
@@ -1092,6 +1099,7 @@ struct sec_charger_platform_data {
 	int irq_gpio;
 	int chg_irq;
 	unsigned long chg_irq_attr;
+	unsigned int chg_ocp_current;
 
 	/* otg_en setting */
 	int otg_en;

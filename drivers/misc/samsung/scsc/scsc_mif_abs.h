@@ -19,7 +19,10 @@ struct device;
 /* To R4/M4 */
 enum scsc_mif_abs_target {
 	SCSC_MIF_ABS_TARGET_R4 = 0,
-	SCSC_MIF_ABS_TARGET_M4 = 1
+	SCSC_MIF_ABS_TARGET_M4 = 1,
+#ifdef CONFIG_SCSC_MX450_GDB_SUPPORT
+	SCSC_MIF_ABS_TARGET_M4_1 = 2
+#endif
 };
 
 #ifdef CONFIG_SCSC_SMAPPER

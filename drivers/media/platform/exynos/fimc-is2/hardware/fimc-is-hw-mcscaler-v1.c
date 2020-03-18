@@ -1303,7 +1303,6 @@ int fimc_is_hw_mcsc_probe(struct fimc_is_hw_ip *hw_ip, struct fimc_is_interface 
 	hw_ip->itf  = itf;
 	hw_ip->itfc = itfc;
 	atomic_set(&hw_ip->fcount, 0);
-	hw_ip->internal_fcount = 0;
 	hw_ip->is_leader = false;
 	atomic_set(&hw_ip->status.Vvalid, V_BLANK);
 	atomic_set(&hw_ip->rsccount, 0);

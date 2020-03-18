@@ -57,6 +57,10 @@ int mif_stream_init(struct mif_stream *stream, enum scsc_mif_abs_target target, 
 	if (intrbit == MIF_STREAM_INTRBIT_TYPE_RESERVED) {
 		if (target == SCSC_MIF_ABS_TARGET_M4)
 			r2 = MIFINTRBIT_RESERVED_PANIC_M4;
+#ifdef CONFIG_SCSC_MX450_GDB_SUPPORT
+		else if (target == SCSC_MIF_ABS_TARGET_M4_1)
+			r2 = MIFINTRBIT_RESERVED_PANIC_M4_1;
+#endif
 		else
 			r2 = MIFINTRBIT_RESERVED_PANIC_R4;
 	} else

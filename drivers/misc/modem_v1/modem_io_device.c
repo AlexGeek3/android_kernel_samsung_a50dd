@@ -367,6 +367,7 @@ static int rx_multi_pdp(struct sk_buff *skb)
 
 	skb_reset_transport_header(skb);
 	skb_reset_network_header(skb);
+	skb_reset_mac_header(skb);
 
 	if (check_gro_support(skb)) {
 		ret = napi_gro_receive(napi_get_current(), skb);
@@ -1111,7 +1112,7 @@ static ssize_t misc_read(struct file *filp, char *buf, size_t count,
 		skb_pull(skb, copied);
 		skb_queue_head(rxq, skb);
 	} else {
-		dev_kfree_skb_any(skb);
+		dev_consume_skb_any(skb);
 	}
 
 	return copied;
@@ -1306,7 +1307,7 @@ static int vnet_xmit(struct sk_buff *skb, struct net_device *ndev)
 	($skb_new will be freed by the link device.)
 	*/
 	if (skb_new != skb)
-		dev_kfree_skb_any(skb);
+		dev_consume_skb_any(skb);
 
 	return NETDEV_TX_OK;
 
@@ -1316,7 +1317,7 @@ retry:
 	because @skb will be reused by NET_TX.
 	*/
 	if (skb_new && skb_new != skb)
-		dev_kfree_skb_any(skb_new);
+		dev_consume_skb_any(skb_new);
 
 	return NETDEV_TX_BUSY;
 
@@ -1329,7 +1330,7 @@ drop:
 	If @skb has been expanded to $skb_new, $skb_new must also be freed here.
 	*/
 	if (skb_new != skb)
-		dev_kfree_skb_any(skb_new);
+		dev_consume_skb_any(skb_new);
 
 	return NETDEV_TX_OK;
 }

@@ -19,7 +19,7 @@
 #include "../../ssp_cmd_define.h"
 #include "../../ssp_comm.h"
 #include "../../ssp_data.h"
-
+#include "../../ssp_sysfs.h"
 /*************************************************************************/
 /* factory Sysfs                                                         */
 /*************************************************************************/
@@ -74,21 +74,20 @@ ssize_t get_magnetic_ak09918c_vendor(char *buf)
 ssize_t get_magnetic_ak09918c_adc(struct ssp_data *data, char *buf)
 {
 	bool bSuccess = false;
-	u8 chTempbuf[8] = {0, };
 	s16 sensor_buf[3] = {0, };
 	int retries = 10;
-	s32 dMsDelay = 20;
-	memcpy(&chTempbuf[0], &dMsDelay, 4);
-
+	
 	data->buf[SENSOR_TYPE_GEOMAGNETIC_FIELD].x = 0;
 	data->buf[SENSOR_TYPE_GEOMAGNETIC_FIELD].y = 0;
 	data->buf[SENSOR_TYPE_GEOMAGNETIC_FIELD].z = 0;
 
 	if (!(atomic64_read(&data->sensor_en_state) & (1ULL <<
 	                                             SENSOR_TYPE_GEOMAGNETIC_FIELD)))
-		make_command(data, ADD_SENSOR, SENSOR_TYPE_GEOMAGNETIC_FIELD,
-		             chTempbuf, 8);
-
+	{
+		set_delay_legacy_sensor(data, SENSOR_TYPE_GEOMAGNETIC_FIELD, 20, 0);
+		enable_legacy_sensor(data, SENSOR_TYPE_GEOMAGNETIC_FIELD);
+	}
+	
 	do {
 		msleep(60);
 		if (check_adc_data_spec(data, SENSOR_TYPE_GEOMAGNETIC_FIELD) == SUCCESS) {
@@ -107,8 +106,7 @@ ssize_t get_magnetic_ak09918c_adc(struct ssp_data *data, char *buf)
 
 	if (!(atomic64_read(&data->sensor_en_state) & (1ULL <<
 	                                             SENSOR_TYPE_GEOMAGNETIC_FIELD)))
-		make_command(data, REMOVE_SENSOR, SENSOR_TYPE_GEOMAGNETIC_FIELD,
-		             chTempbuf, 4);
+		disable_legacy_sensor(data, SENSOR_TYPE_GEOMAGNETIC_FIELD);
 
 	pr_info("[SSP] %s - x = %d, y = %d, z = %d\n", __func__,
 	        sensor_buf[0], sensor_buf[1], sensor_buf[2]);
@@ -208,8 +206,8 @@ ssize_t set_magnetic_ak09918c_raw_data(struct ssp_data *data, const char *buf)
 		data->buf[SENSOR_TYPE_GEOMAGNETIC_POWER].y = 0;
 		data->buf[SENSOR_TYPE_GEOMAGNETIC_POWER].z = 0;
 
-		make_command(data, ADD_SENSOR, SENSOR_TYPE_GEOMAGNETIC_POWER,
-		             chTempbuf, 8);
+		set_delay_legacy_sensor(data, SENSOR_TYPE_GEOMAGNETIC_POWER, 20, 0);
+		enable_legacy_sensor(data, SENSOR_TYPE_GEOMAGNETIC_POWER);
 
 		do {
 			msleep(20);
@@ -229,8 +227,7 @@ ssize_t set_magnetic_ak09918c_raw_data(struct ssp_data *data, const char *buf)
 
 
 	} else {
-		make_command(data, REMOVE_SENSOR, SENSOR_TYPE_GEOMAGNETIC_POWER,
-		             chTempbuf, 4);
+		disable_legacy_sensor(data, SENSOR_TYPE_GEOMAGNETIC_POWER);
 		data->is_geomag_raw_enabled = false;
 	}
 
@@ -386,10 +383,8 @@ ssize_t get_magnetic_ak09918c_selftest(struct ssp_data *data, char *buf)
 	s8 result[4] = {-1, -1, -1, -1};
 	char *buf_selftest = NULL;
 	int buf_selftest_length = 0;
-	char bufAdc[8] = {0, };
 	s16 iSF_X = 0, iSF_Y = 0, iSF_Z = 0;
 	s16 iADC_X = 0, iADC_Y = 0, iADC_Z = 0;
-	s32 dMsDelay = 20;
 	int ret = 0;
 	int spec_out_retries = 0;
 
@@ -470,16 +465,16 @@ Retry_selftest:
 	spec_out_retries = 10;
 
 	/* ADC */
-	memcpy(&bufAdc[0], &dMsDelay, 4);
-
 	data->buf[SENSOR_TYPE_GEOMAGNETIC_POWER].x = 0;
 	data->buf[SENSOR_TYPE_GEOMAGNETIC_POWER].y = 0;
 	data->buf[SENSOR_TYPE_GEOMAGNETIC_POWER].z = 0;
 
 	if (!(atomic64_read(&data->sensor_en_state) & (1ULL <<
 	                                             SENSOR_TYPE_GEOMAGNETIC_POWER)))
-		make_command(data, ADD_SENSOR, SENSOR_TYPE_GEOMAGNETIC_POWER,
-		             bufAdc, 8);
+	{
+		set_delay_legacy_sensor(data, SENSOR_TYPE_GEOMAGNETIC_POWER, 20, 0);
+		enable_legacy_sensor(data, SENSOR_TYPE_GEOMAGNETIC_POWER);
+	}
 
 	do {
 		msleep(60);
@@ -498,8 +493,7 @@ Retry_selftest:
 
 	if (!(atomic64_read(&data->sensor_en_state) & (1ULL <<
 	                                             SENSOR_TYPE_GEOMAGNETIC_POWER)))
-		make_command(data, REMOVE_SENSOR, SENSOR_TYPE_GEOMAGNETIC_POWER,
-		             bufAdc, 4);
+		disable_legacy_sensor(data, SENSOR_TYPE_GEOMAGNETIC_POWER);
 
 	pr_info("[SSP] %s -adc, x = %d, y = %d, z = %d, retry = %d\n",
 	        __func__, iADC_X, iADC_Y, iADC_Z, spec_out_retries);

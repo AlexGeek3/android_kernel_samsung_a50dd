@@ -11,8 +11,8 @@
 #include <linux/err.h>
 #include <linux/input.h>
 #include <linux/sched/clock.h>
-#if defined(CONFIG_SEC_SYSFS)
-#include <linux/sec_sysfs.h>
+#if defined(CONFIG_DRV_SAMSUNG)
+#include <linux/sec_class.h>
 #endif
 
 #ifndef CONFIG_SEC_FACTORY
@@ -20,7 +20,7 @@
 #include <linux/kfifo.h>
 #endif
 
-#ifndef CONFIG_SEC_SYSFS
+#ifndef CONFIG_DRV_SAMSUNG
 extern struct class *sec_class;
 #endif
 

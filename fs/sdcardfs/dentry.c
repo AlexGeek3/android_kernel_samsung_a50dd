@@ -25,6 +25,7 @@
 extern
 int __fscrypt_sdp_d_delete(const struct dentry *dentry, int dek_is_locked);
 #endif
+
 /*
  * returns: -ERRNO if error (returned to user)
  *          0: tell VFS to invalidate dentry
@@ -127,6 +128,27 @@ out:
 	return err;
 }
 
+/* 1 = delete, 0 = cache */
+static int sdcardfs_d_delete(const struct dentry *d)
+{
+#ifdef CONFIG_FSCRYPT_SDP
+	struct sdcardfs_dentry_info *info = SDCARDFS_D(d);
+	struct path *lower_path = &info->lower_path;
+	unsigned long lower_fs_magic = lower_path->mnt->mnt_sb->s_magic;
+
+	/*
+	 * Always delete sdcardfs dentries for lower SDP ones regardless of
+	 * container lock state
+	 */
+	if (lower_fs_magic == EXT4_SUPER_MAGIC ||
+			lower_fs_magic == F2FS_SUPER_MAGIC) {
+		if (__fscrypt_sdp_d_delete(lower_path->dentry, 1))
+			return 1;
+	}
+#endif
+	return SDCARDFS_SB(d->d_sb)->options.nocache ? 1 : 0;
+}
+
 static void sdcardfs_d_release(struct dentry *dentry)
 {
 	if (!dentry || !dentry->d_fsdata)
@@ -181,29 +203,6 @@ static void sdcardfs_canonical_path(const struct path *path,
 				struct path *actual_path)
 {
 	sdcardfs_get_real_lower(path->dentry, actual_path);
-}
-
-/* P181109-04632 */
-static int sdcardfs_d_delete(const struct dentry *dentry)
-{
-	struct sdcardfs_dentry_info *info = SDCARDFS_D(dentry);
-	struct path *lower_path = &info->lower_path;
-	unsigned long lower_fs_magic = lower_path->mnt->mnt_sb->s_magic;
-
-	if (lower_fs_magic == EXT4_SUPER_MAGIC ||
-			lower_fs_magic == F2FS_SUPER_MAGIC) {
-#ifndef CONFIG_FSCRYPT_SDP
-		return 0;
-#else
-		/*
-		 * Always delete sdcardfs dentries for lower SDP ones
-		 * regardless of container lock state
-		 */
-		return __fscrypt_sdp_d_delete(lower_path->dentry, 1);
-#endif
-	}
-
-	return 1;
 }
 
 const struct dentry_operations sdcardfs_ci_dops = {

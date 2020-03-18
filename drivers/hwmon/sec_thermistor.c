@@ -20,7 +20,7 @@
 #include <linux/hwmon-sysfs.h>
 #include <linux/iio/consumer.h>
 #include <linux/platform_data/sec_thermistor.h>
-#include <linux/sec_sysfs.h>
+#include <linux/sec_class.h>
 
 #define ADC_SAMPLING_CNT	5
 
@@ -188,13 +188,25 @@ static ssize_t sec_therm_show_temperature(struct device *dev,
 {
 	struct sec_therm_info *info = dev_get_drvdata(dev);
 	int adc, temp;
+	static int prev_temp = 9990, prev_adc = 0;
 
 	adc = sec_therm_get_adc_data(info);
 
-	if (adc >= 0)
-		temp = convert_adc_to_temper(info, adc);
-	else
+	if (adc < 0)
 		return adc;
+	else
+		temp = convert_adc_to_temper(info, adc);
+
+	if (prev_temp != 9990) {
+		if (temp >= 600 &&
+			((prev_temp > temp && (prev_temp - temp) > 50) ||
+			 (prev_temp < temp && (temp - prev_temp) > 50))) {
+			pr_info("%s: adc %d -> %d, temp %d -> %d\n",
+				__func__, prev_adc, adc, prev_temp, temp);
+		}
+	}
+	prev_temp = temp;
+	prev_adc = adc;
 
 	return sprintf(buf, "%d\n", temp);
 }

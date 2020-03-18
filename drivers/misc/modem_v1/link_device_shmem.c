@@ -794,7 +794,7 @@ static int tx_frames_to_dev(struct mem_link_device *mld,
 		mif_pkt(skbpriv(skb)->sipc_ch, "LNK-TX", skb);
 #endif
 
-		dev_kfree_skb_any(skb);
+		dev_consume_skb_any(skb);
 	}
 
 	return (ret < 0) ? ret : tx_bytes;
@@ -1010,7 +1010,7 @@ static int tx_frames_to_rb(struct sbd_ring_buffer *rb)
 #ifdef DEBUG_MODEM_IF_LINK_TX
 		mif_pkt(rb->ch, "LNK-TX", skb);
 #endif
-		dev_kfree_skb_any(skb);
+		dev_consume_skb_any(skb);
 	}
 
 	return (ret < 0) ? ret : tx_bytes;
@@ -1342,7 +1342,7 @@ static int xmit_udl(struct mem_link_device *mld, struct io_device *iod,
 	mif_pkt(ch, "LNK-TX", skb);
 #endif
 
-	dev_kfree_skb_any(skb);
+	dev_consume_skb_any(skb);
 
 exit:
 	return ret;
@@ -1913,7 +1913,7 @@ static void shmem_oom_handler_work(struct work_struct *ws)
 	/* try to page reclaim with GFP_KERNEL */
 	skb = alloc_skb(PAGE_SIZE - 512, GFP_KERNEL);
 	if (skb)
-		dev_kfree_skb_any(skb);
+		dev_consume_skb_any(skb);
 
 	/* need to disable the RX irq ?? */
 	msleep(200);

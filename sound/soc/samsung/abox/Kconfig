@@ -15,3 +15,11 @@ config SEC_SND_SYNCHRONIZED_IPC
 	  Say Y or M if you want to add support for external devices attached to
 	  the Samsung SoC ABOX interface. You will also need to
 	  select the audio interfaces to support below.
+
+config SEC_SND_SYNCHRONIZED_IPC_RICHTEK
+	tristate "Samsung ABOX Synchronized IPC for Audio AMP Richtek"
+	depends on SND_SOC_SAMSUNG_ABOX
+	help
+	  Say Y or M if you want to add support for external devices attached to
+	  the Samsung SoC ABOX interface. You will also need to
+	  select the audio interfaces to support below.

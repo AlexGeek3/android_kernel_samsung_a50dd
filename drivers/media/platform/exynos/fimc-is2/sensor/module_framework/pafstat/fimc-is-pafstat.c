@@ -374,6 +374,7 @@ int pafstat_hw_set_regs(struct v4l2_subdev *subdev,
 		break;
 	case VC_SENSOR_MODE_IMX_2X1OCL_1_TAIL:
 	case VC_SENSOR_MODE_IMX_2X1OCL_2_TAIL:
+	case VC_SENSOR_MODE_SUPER_PD_2_TAIL:	
 		distance_pd_pixel = 2;
 		break;
 	default:
@@ -693,6 +694,7 @@ static int pafstat_s_format(struct v4l2_subdev *subdev,
 	size_t width, height;
 	int irq_state = 0;
 	int pd_enable = 0;
+	int sensor_mode = VC_BUF_DATA_TYPE_INVALID;
 	u32 lic_mode;
 	int pd_mode = PD_NONE;
 	enum pafstat_input_path input = PAFSTAT_INPUT_OTF;
@@ -743,8 +745,13 @@ static int pafstat_s_format(struct v4l2_subdev *subdev,
 	if (sensor->cfg) {
 		pafstat->pd_width = sensor->cfg->input[CSI_VIRTUAL_CH_1].width;
 		pafstat->pd_height = sensor->cfg->input[CSI_VIRTUAL_CH_1].height;
-		if (sensor->cfg->pd_mode == PD_MSPD_TAIL)
+
+		sensor_mode = module->vc_extra_info[VC_BUF_DATA_TYPE_GENERAL_STAT1].sensor_mode;
+		if (sensor_mode == VC_SENSOR_MODE_IMX_2X1OCL_1_TAIL
+			|| sensor_mode == VC_SENSOR_MODE_SUPER_PD_2_TAIL)
 			pafstat->pd_height /= 2;
+		else if (sensor_mode == VC_SENSOR_MODE_IMX_2X1OCL_2_TAIL)
+			pafstat->pd_width /= 2;
 
 		pafstat_hw_s_pd_size(pafstat->regs, pafstat->pd_width, pafstat->pd_height);
 		pd_mode = sensor->cfg->pd_mode;

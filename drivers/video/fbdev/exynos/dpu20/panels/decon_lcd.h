@@ -98,12 +98,12 @@ struct decon_lcd {
 	unsigned int update_min_w;
 	unsigned int update_min_h;
 
+	unsigned int clklane_onoff;
+	unsigned int noncontinuous_clklane;
+
 	unsigned int hs_clk;
 	struct stdphy_pms dphy_pms;
 	unsigned int esc_clk;
-
-	unsigned int clklane_onoff;
-	unsigned int noncontinuous_clklane;
 
 	unsigned int fps;
 	unsigned int mic_enabled;

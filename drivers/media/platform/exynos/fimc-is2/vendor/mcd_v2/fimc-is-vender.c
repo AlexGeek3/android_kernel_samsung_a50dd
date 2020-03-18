@@ -399,22 +399,22 @@ int fimc_is_vender_dt(struct device_node *np)
 
 	ret = of_property_read_u32(np, "front_sensor_id", &front_sensor_id);
 	if (ret) {
-		probe_err("front_sensor_id read is fail(%d)", ret);
+		probe_warn("front_sensor_id read is fail(%d)", ret);
 	}
 
 	ret = of_property_read_u32(np, "rear2_sensor_id", &rear2_sensor_id);
 	if (ret) {
-		probe_err("rear2_sensor_id read is fail(%d)", ret);
+		probe_warn("rear2_sensor_id read is fail(%d)", ret);
 	}
 
 	ret = of_property_read_u32(np, "front2_sensor_id", &front2_sensor_id);
 	if (ret) {
-		probe_err("front2_sensor_id read is fail(%d)", ret);
+		probe_warn("front2_sensor_id read is fail(%d)", ret);
 	}
 
 	ret = of_property_read_u32(np, "rear3_sensor_id", &rear3_sensor_id);
 	if (ret) {
-		probe_err("rear3_sensor_id read is fail(%d)", ret);
+		probe_warn("rear3_sensor_id read is fail(%d)", ret);
 	}
 
 #ifdef CONFIG_SECURE_CAMERA_USE
@@ -427,8 +427,9 @@ int fimc_is_vender_dt(struct device_node *np)
 
 	check_sensor_vendor = of_property_read_bool(np, "check_sensor_vendor");
 	if (!check_sensor_vendor) {
-		probe_info("check_sensor_vendor not use(%d)\n", check_sensor_vendor);
+		probe_warn("check_sensor_vendor not use(%d)\n", check_sensor_vendor);
 	}
+
 #ifdef CONFIG_OIS_USE
 	use_ois = of_property_read_bool(np, "use_ois");
 	if (!use_ois) {
@@ -443,12 +444,12 @@ int fimc_is_vender_dt(struct device_node *np)
 
 	need_i2c_config = of_property_read_bool(np, "need_i2c_config");
 	if(!need_i2c_config) {
-		probe_err("need_i2c_config not use(%d)", need_i2c_config);
+		probe_warn("need_i2c_config not use(%d)", need_i2c_config);
 	}
 
 	use_module_check = of_property_read_bool(np, "use_module_check");
 	if (!use_module_check) {
-		probe_err("use_module_check not use(%d)", use_module_check);
+		probe_warn("use_module_check not use(%d)", use_module_check);
 	}
 
 	skip_cal_loading = of_property_read_bool(np, "skip_cal_loading");
@@ -653,21 +654,7 @@ int fimc_is_vender_fw_filp_open(struct fimc_is_vender *vender, struct file **fp,
 	core = container_of(vender, struct fimc_is_core, vender);
 	memset(fw_path, 0x00, sizeof(fw_path));
 
-	if (bin_type == FIMC_IS_BIN_FW) {
-		if (is_dumped_fw_loading_needed) {
-			snprintf(fw_path, sizeof(fw_path),
-					"%s%s", FIMC_IS_FW_DUMP_PATH, sysfs_finfo->load_fw_name);
-			*fp = filp_open(fw_path, O_RDONLY, 0);
-			if (IS_ERR_OR_NULL(*fp)) {
-				*fp = NULL;
-				ret = FW_FAIL;
-			} else {
-				ret = FW_SUCCESS;
-			}
-		} else {
-			ret = FW_SKIP;
-		}
-	} else if (bin_type == FIMC_IS_BIN_SETFILE) {
+	if (bin_type == IS_BIN_SETFILE) {
 		if (is_dumped_fw_loading_needed) {
 #ifdef CAMERA_MODULE_FRONT_SETF_DUMP
 			if (core->current_position == SENSOR_POSITION_FRONT) {

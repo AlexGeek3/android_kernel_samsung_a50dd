@@ -21,8 +21,8 @@
 #include <linux/delay.h>
 #include <linux/wakelock.h>
 
-#ifdef CONFIG_SEC_SYSFS
-#include <linux/sec_sysfs.h>
+#ifdef CONFIG_DRV_SAMSUNG
+#include <linux/sec_class.h>
 #endif
 #include <linux/sec_batt.h>
 #include <linux/sec_ext.h>
@@ -764,17 +764,17 @@ static DEVICE_ATTR(uart_en, 0664, sm5713_muic_show_uart_en,
 static DEVICE_ATTR(uart_sel, 0664, sm5713_muic_show_uart_sel,
 					sm5713_muic_set_uart_sel);
 #endif
-static DEVICE_ATTR(adc, 0664, sm5713_muic_show_adc, NULL);
+static DEVICE_ATTR(adc, 0444, sm5713_muic_show_adc, NULL);
 #ifdef DEBUG_MUIC
-static DEVICE_ATTR(mansw, 0664, sm5713_muic_show_mansw, NULL);
-static DEVICE_ATTR(dump_registers, 0664, sm5713_muic_show_registers, NULL);
+static DEVICE_ATTR(mansw, 0444, sm5713_muic_show_mansw, NULL);
+static DEVICE_ATTR(dump_registers, 0444, sm5713_muic_show_registers, NULL);
 #endif
-static DEVICE_ATTR(usb_state, 0664, sm5713_muic_show_usb_state, NULL);
+static DEVICE_ATTR(usb_state, 0444, sm5713_muic_show_usb_state, NULL);
 #if defined(CONFIG_USB_HOST_NOTIFY)
 static DEVICE_ATTR(otg_test, 0664,
 		sm5713_muic_show_otg_test, sm5713_muic_set_otg_test);
 #endif
-static DEVICE_ATTR(attached_dev, 0664, sm5713_muic_show_attached_dev, NULL);
+static DEVICE_ATTR(attached_dev, 0444, sm5713_muic_show_attached_dev, NULL);
 static DEVICE_ATTR(audio_path, 0664,
 		sm5713_muic_show_audio_path, sm5713_muic_set_audio_path);
 static DEVICE_ATTR(apo_factory, 0664,
@@ -1117,26 +1117,6 @@ static int attach_jig_uart_path(struct sm5713_muic_data *muic_data, int new_dev)
 	return ret;
 }
 
-void sm5713_muic_set_bc12off(int enable)
-{
-	struct i2c_client *i2c = static_data->i2c;
-	int reg_value = 0;
-
-	pr_info("[%s:%s] enable=%d\n", MUIC_DEV_NAME, __func__, enable);
-	if (static_data == NULL)
-		return;
-
-	reg_value = sm5713_i2c_read_byte(i2c, SM5713_MUIC_REG_CNTL);
-	if (enable == 1) /* 1:bc12 enable , 0:bc12 disable*/
-		reg_value = reg_value & 0xFD;
-	else
-		reg_value = reg_value | 0x02;
-	sm5713_i2c_write_byte(i2c, SM5713_MUIC_REG_CNTL, reg_value);
-	pr_info("[%s:%s] reg_value = 0x%x\n", MUIC_DEV_NAME,
-			__func__, reg_value);
-}
-EXPORT_SYMBOL(sm5713_muic_set_bc12off);
-
 int sm5713_muic_get_jig_status(void)
 {
 	struct i2c_client *i2c = static_data->i2c;
@@ -1347,6 +1327,8 @@ static void sm5713_muic_handle_attach(struct sm5713_muic_data *muic_data,
 
 	switch (new_dev) {
 	case ATTACHED_DEV_OTG_MUIC:
+
+	/* FALLTHROUGH */
 	case ATTACHED_DEV_USB_MUIC:
 	case ATTACHED_DEV_CDP_MUIC:
 		ret = com_to_usb(muic_data);
@@ -1423,6 +1405,14 @@ static void sm5713_muic_handle_detach(struct sm5713_muic_data *muic_data,
 {
 	int ret = 0;
 	bool noti = true;
+
+	muic_data->hv_voltage = 0;
+
+	if (muic_data->is_water_detect) {
+		pr_info("[%s:%s] skipped by water detected condition\n",
+				MUIC_DEV_NAME, __func__);
+		return;
+	}
 
 	pr_info("[%s:%s] attached_dev:%d\n", MUIC_DEV_NAME, __func__,
 			muic_data->attached_dev);
@@ -1766,11 +1756,8 @@ static int sm5713_muic_reg_init(struct sm5713_muic_data *muic_data)
 
 	/* set dcd timer out to 0.8s */
 	cntl &= ~CTRL_DCDTIMER_MASK;
-#ifdef CONFIG_MUIC_SM5713_BC1_2_CERTI
-	cntl |= (CTRL_DCDTIMER_MASK & 0x01);
-#else
 	cntl |= (CTRL_DCDTIMER_MASK & 0x10);
-#endif
+
 	sm5713_i2c_write_byte(i2c, SM5713_MUIC_REG_CNTL, cntl);
 
 	pr_info("[%s:%s] intmask1:0x%x, intmask2:0x%x, cntl:0x%x, mansw:0x%x\n",
@@ -2251,6 +2238,7 @@ static int sm5713_muic_probe(struct platform_device *pdev)
 	muic_data->fled_torch_enable = false;
 	muic_data->fled_flash_enable = false;
 	muic_data->old_afctxd = 0x00;
+	muic_data->hv_voltage = 0;
 
 #if defined(CONFIG_HICCUP_CHARGER)
 	muic_data->is_hiccup_mode = false;
@@ -2285,7 +2273,7 @@ static int sm5713_muic_probe(struct platform_device *pdev)
 		goto fail_init_gpio;
 	}
 
-#ifdef CONFIG_SEC_SYSFS
+#ifdef CONFIG_DRV_SAMSUNG
 	/* create sysfs group */
 	ret = sysfs_create_group(&switch_device->kobj, &sm5713_muic_group);
 	if (ret) {
@@ -2368,7 +2356,7 @@ static int sm5713_muic_probe(struct platform_device *pdev)
 fail_init_irq:
 	sm5713_muic_free_irqs(muic_data);
 fail:
-#ifdef CONFIG_SEC_SYSFS
+#ifdef CONFIG_DRV_SAMSUNG
 	sysfs_remove_group(&switch_device->kobj, &sm5713_muic_group);
 #endif
 	mutex_destroy(&muic_data->switch_mutex);
@@ -2388,7 +2376,7 @@ err_return:
 static int sm5713_muic_remove(struct platform_device *pdev)
 {
 	struct sm5713_muic_data *muic_data = platform_get_drvdata(pdev);
-#ifdef CONFIG_SEC_SYSFS
+#ifdef CONFIG_DRV_SAMSUNG
 	sysfs_remove_group(&switch_device->kobj, &sm5713_muic_group);
 #endif
 

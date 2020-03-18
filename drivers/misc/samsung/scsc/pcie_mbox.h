@@ -37,6 +37,9 @@ struct pcie_mbox {
 	struct pcie_mbox_intgen ap_intgen;
 	struct pcie_mbox_intgen r4_intgen;
 	struct pcie_mbox_intgen m4_intgen;
+#ifdef CONFIG_SCSC_MX450_GDB_SUPPORT
+	struct pcie_mbox_intgen m4_intgen_1;
+#endif
 };
 
 /* Public Functions */
@@ -50,7 +53,12 @@ void pcie_mbox_init(
 	__iomem void            *pcie_registers,
 	struct functor          *ap_interrupt_trigger,
 	struct functor          *r4_interrupt_trigger,
+#ifdef CONFIG_SCSC_MX450_GDB_SUPPORT
+	struct functor          *m4_interrupt_trigger,
+	struct functor          *m4_1_interrupt_trigger
+#else
 	struct functor          *m4_interrupt_trigger
+#endif
 	);
 
 /**

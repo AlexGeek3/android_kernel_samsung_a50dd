@@ -565,8 +565,8 @@ void ist40xx_result_calculate(struct ist40xx_data *data, u32 mode)
 		for (i = 0; i < tsp->ch_num.tx; i++) {
 			for (j = 0; j < tsp->ch_num.rx; j++) {
 				idx = (i * tsp->ch_num.rx) + j;
-				if ((cmcs_buf->cm[idx] < CM_MIN_SPEC) &&
-						(cmcs_buf->cm[idx] > CM_MAX_SPEC)) {
+				if ((cmcs_buf->cm[idx] < data->dt_data->cm_min_spec) ||
+						(cmcs_buf->cm[idx] > data->dt_data->cm_max_spec)) {
 					if (i >= 32)
 						cmcs_buf->cm_tx_result[1] |= (1 << (i - 32));
 					else
@@ -618,10 +618,8 @@ void ist40xx_slope_calculate(struct ist40xx_data *data)
 			if (j == (tsp->ch_num.rx - 1)) {
 				cmcs_buf->slope0[idx] = 0;
 			} else {
-				if (cmcs_buf->cm[idx]) {
-					cmcs_buf->slope0[idx] =
-						DIV_ROUND_CLOSEST(100 * (s16)abs(cmcs_buf->cm[idx] -
-									cmcs_buf->cm[next_idx]), cmcs_buf->cm[idx]);
+				if (cmcs_buf->cm[idx] && cmcs_buf->cm[next_idx]) {
+					cmcs_buf->slope0[idx] = 100 - DIV_ROUND_CLOSEST(100 * min(cmcs_buf->cm[idx], cmcs_buf->cm[next_idx]), max(cmcs_buf->cm[idx], cmcs_buf->cm[next_idx]));
 				} else {
 					cmcs_buf->slope0[idx] = 9999;
 				}
@@ -631,10 +629,8 @@ void ist40xx_slope_calculate(struct ist40xx_data *data)
 			if (i == (tsp->ch_num.tx - 1)) {
 				cmcs_buf->slope1[idx] = 0;
 			} else {
-				if (cmcs_buf->cm[idx]) {
-					cmcs_buf->slope1[idx] =
-						DIV_ROUND_CLOSEST(100 * (s16)abs(cmcs_buf->cm[idx] -
-									cmcs_buf->cm[next_idx]), cmcs_buf->cm[idx]);
+				if (cmcs_buf->cm[idx] && cmcs_buf->cm[next_idx]) {
+					cmcs_buf->slope1[idx] = 100 - DIV_ROUND_CLOSEST(100 * min(cmcs_buf->cm[idx], cmcs_buf->cm[next_idx]), max(cmcs_buf->cm[idx], cmcs_buf->cm[next_idx]));
 				} else {
 					cmcs_buf->slope1[idx] = 9999;
 				}
@@ -644,7 +640,7 @@ void ist40xx_slope_calculate(struct ist40xx_data *data)
 				(cmcs_buf->slope0[idx] > cmcs_buf->slope1[idx]) ?
 				cmcs_buf->slope0[idx] : cmcs_buf->slope1[idx];
 
-			if (cmcs_buf->slope[idx] > SPEC_GAP) {
+			if (cmcs_buf->slope[idx] > data->dt_data->cm_spec_gap) {
 				if (i >= 32)
 					cmcs_buf->slope_tx_result[1] |= (1 << (i - 32));
 				else
@@ -1406,6 +1402,11 @@ int ist40xx_init_cmcs_sysfs(struct ist40xx_data *data)
 
 	/* /sys/class/touch/cmcs/... */
 	ist40xx_init_cmcs_bin_attribute();
+
+	if (data->dt_data->bringup == 1) {
+		input_info(true, &data->client->dev, "%s skip (bringup 1)\n", __func__);
+		return 0;
+	}
 
 	ret = request_firmware(&cmcs_bin, data->dt_data->cmcs_path,
 			&data->client->dev);

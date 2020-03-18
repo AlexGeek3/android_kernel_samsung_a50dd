@@ -501,8 +501,10 @@ static int __mfc_nal_q_just_run(struct mfc_ctx *ctx, int need_cache_flush)
 			}
 
 			mfc_clear_bit(ctx->num, &dev->work_bits);
-			if ((mfc_ctx_ready(ctx) && !ctx->clear_work_bit) ||
-					nal_q_handle->nal_q_exception)
+
+			if (!ctx->clear_work_bit)
+				mfc_ctx_ready_set_bit(ctx, &dev->work_bits);
+			if (nal_q_handle->nal_q_exception)
 				mfc_set_bit(ctx->num, &dev->work_bits);
 			ctx->clear_work_bit = 0;
 
@@ -539,8 +541,9 @@ static int __mfc_nal_q_just_run(struct mfc_ctx *ctx, int need_cache_flush)
 
 			mfc_clear_bit(ctx->num, &dev->work_bits);
 
-			if ((mfc_ctx_ready(ctx) && !ctx->clear_work_bit) ||
-					nal_q_handle->nal_q_exception)
+			if (!ctx->clear_work_bit)
+				mfc_ctx_ready_set_bit(ctx, &dev->work_bits);
+			if (nal_q_handle->nal_q_exception)
 				mfc_set_bit(ctx->num, &dev->work_bits);
 			ctx->clear_work_bit = 0;
 
@@ -587,6 +590,11 @@ static int __mfc_just_run_dec(struct mfc_ctx *ctx)
 		if (ctx->codec_buffer_allocated == 0) {
 			ctx->clear_work_bit = 1;
 			mfc_err_ctx("codec buffer is not allocated\n");
+			ret = -EAGAIN;
+			break;
+		}
+		if (ctx->wait_state != WAIT_NONE) {
+			mfc_err_ctx("wait_state(%d) is not ready\n", ctx->wait_state);
 			ret = -EAGAIN;
 			break;
 		}
@@ -722,7 +730,9 @@ int mfc_just_run(struct mfc_dev *dev, int new_ctx_index)
 	if (ret) {
 		/* Check again the ctx condition and clear work bits
 		 * if ctx is not available. */
-		if (mfc_ctx_ready(ctx) == 0 || ctx->clear_work_bit) {
+		if (mfc_ctx_ready_clear_bit(ctx, &dev->work_bits) == 0)
+			ctx->clear_work_bit = 0;
+		if (ctx->clear_work_bit) {
 			mfc_clear_bit(ctx->num, &dev->work_bits);
 			ctx->clear_work_bit = 0;
 		}

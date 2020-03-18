@@ -146,6 +146,7 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 				total_swapcache_pages();
 
 	static DEFINE_RATELIMIT_STATE(lmk_rs, DEFAULT_RATELIMIT_INTERVAL, 1);
+	static DEFINE_RATELIMIT_STATE(lmk_rs2, 60 * HZ, 1);
 #if defined(CONFIG_SWAP)
 	unsigned long swap_orig_nrpages;
 	unsigned long swap_comp_nrpages;
@@ -277,7 +278,8 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 		lowmem_lmkcount++;
 		show_mem_extra_call_notifiers();
 		show_memory();
-		if ((selected_oom_score_adj <= 100) && (__ratelimit(&lmk_rs)))
+		if (((selected_oom_score_adj <= 100) && (__ratelimit(&lmk_rs))) ||
+				((min_score_adj <= 200) && (__ratelimit(&lmk_rs2))))
 			dump_tasks(NULL, NULL);
 	}
 

@@ -31,13 +31,15 @@
 #include <linux/of_irq.h>
 #include <linux/spinlock.h>
 #include <linux/debug-snapshot.h>
-#include <linux/sec_sysfs.h>
+#include <linux/sec_class.h>
 #include <linux/sec_debug.h>
 
 struct device *sec_key;
 EXPORT_SYMBOL(sec_key);
 
+#ifndef CONFIG_SEC_KEY_NOTIFIER
 static int call_gpio_keys_notifier(unsigned int code, int state);
+#endif
 
 struct gpio_button_data {
 	struct gpio_keys_button *button;
@@ -557,9 +559,9 @@ static ssize_t key_pressed_count_store(struct device *dev,
 	return count;
 }
 
-static DEVICE_ATTR(sec_key_pressed, 0664, key_pressed_show, NULL);
-static DEVICE_ATTR(sec_key_pressed_code, 0664, key_pressed_show_code, NULL);
-static DEVICE_ATTR(wakeup_keys, 0664, NULL, wakeup_enable);
+static DEVICE_ATTR(sec_key_pressed, 0444, key_pressed_show, NULL);
+static DEVICE_ATTR(sec_key_pressed_code, 0444, key_pressed_show_code, NULL);
+static DEVICE_ATTR(wakeup_keys, 0220, NULL, wakeup_enable);
 static DEVICE_ATTR(keycode_pressed, 0444, keycode_pressed_show, NULL);
 static DEVICE_ATTR(key_pressed_count, 0664, key_pressed_count_show, key_pressed_count_store);
 
@@ -624,6 +626,7 @@ static void gpio_keys_gpio_work_func(struct work_struct *work)
 static irqreturn_t gpio_keys_gpio_isr(int irq, void *dev_id)
 {
 	struct gpio_button_data *bdata = dev_id;
+#ifndef CONFIG_SEC_KEY_NOTIFIER
 	/*
 	 * int state = (gpio_get_value(bdata->button->gpio) ? 1 : 0) ^ bdata->button->active_low;
 	 *
@@ -632,10 +635,13 @@ static irqreturn_t gpio_keys_gpio_isr(int irq, void *dev_id)
 	 *
 	 */
 	int state = gpiod_get_value(bdata->gpiod);
+#endif
 
 	BUG_ON(irq != bdata->irq);
 
+#ifndef CONFIG_SEC_KEY_NOTIFIER
 	call_gpio_keys_notifier(bdata->button->code, state);
+#endif
 
 	if (bdata->button->wakeup) {
 		const struct gpio_keys_button *button = bdata->button;
@@ -1153,6 +1159,7 @@ static int __maybe_unused gpio_keys_resume(struct device *dev)
 	return 0;
 }
 
+#ifndef CONFIG_SEC_KEY_NOTIFIER
 static ATOMIC_NOTIFIER_HEAD(gpio_keys_notifiers);
 
 int register_gpio_keys_notifier(struct  notifier_block *nb)
@@ -1171,6 +1178,7 @@ static int call_gpio_keys_notifier(unsigned int code, int state)
 {
 	return atomic_notifier_call_chain(&gpio_keys_notifiers, code, &state);
 }
+#endif
 
 static SIMPLE_DEV_PM_OPS(gpio_keys_pm_ops, gpio_keys_suspend, gpio_keys_resume);
 

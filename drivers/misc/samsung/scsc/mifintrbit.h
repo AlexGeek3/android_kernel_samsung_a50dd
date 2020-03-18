@@ -18,7 +18,12 @@ struct mifintrbit; /* fwd - opaque pointer */
 
 /** Reserve MIF interrupt bits 0 in the to-r4 and to-m4 registers for purpose of forcing panics  */
 #define MIFINTRBIT_RESERVED_PANIC_R4     0
+#ifdef CONFIG_SCSC_MX450_GDB_SUPPORT
 #define MIFINTRBIT_RESERVED_PANIC_M4     0
+#define MIFINTRBIT_RESERVED_PANIC_M4_1   0
+#else
+#define MIFINTRBIT_RESERVED_PANIC_M4     0
+#endif
 
 void mifintrbit_init(struct mifintrbit *intr, struct scsc_mif_abs *mif);
 void mifintrbit_deinit(struct mifintrbit *intr);
@@ -46,6 +51,9 @@ struct mifintrbit {
 	DECLARE_BITMAP(bitmap_tohost, MIFINTRBIT_NUM_INT);
 	DECLARE_BITMAP(bitmap_fromhost_r4, MIFINTRBIT_NUM_INT);
 	DECLARE_BITMAP(bitmap_fromhost_m4, MIFINTRBIT_NUM_INT);
+#ifdef CONFIG_SCSC_MX450_GDB_SUPPORT
+	DECLARE_BITMAP(bitmap_fromhost_m4_1, MIFINTRBIT_NUM_INT);
+#endif
 };
 
 

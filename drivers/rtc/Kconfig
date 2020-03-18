@@ -1724,6 +1724,13 @@ config RTC_DRV_MT6397
 
 	  If you want to use Mediatek(R) RTC interface, select Y or M here.
 
+config RTC_ALARM_BOOT
+	bool "Android alarm boot function"
+	default n
+	help
+	  This is for alarm booting function. This feature is only used in
+	  Chinese models.
+
 config RTC_DRV_XGENE
 	tristate "APM X-Gene RTC"
 	depends on HAS_IOMEM

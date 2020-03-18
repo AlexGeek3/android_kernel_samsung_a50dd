@@ -46,38 +46,31 @@ config EXYNOS_DECON_LCD_EMUL_DISP
 	tristate "Virtual LCD driver for emulator(800 x 1280)"
 
 config DISPLAY_USE_INFO
-	depends on EXYNOS_DECON_LCD
 	tristate "Support display use info logging"
 	default n
 
 config EXYNOS_DECON_MDNIE
-	depends on EXYNOS_DECON_LCD
 	tristate "Support MDNIE"
 	default n
 
 config LCD_HMT
 	bool "Suppot video emul & aid reverse to VR"
-	depends on EXYNOS_DECON_LCD
 	default n
 
 config SUPPORT_MASK_LAYER
 	bool "Support mask layer"
-	depends on EXYNOS_DECON_LCD
 	default y
 
 config LOGGING_BIGDATA_BUG
 	bool "Logging extra information when decon bug"
-	depends on EXYNOS_DECON_LCD
+	depends on SEC_DEBUG
 	default n
 
-config EXYNOS_DECON_LCD_S6E3FA7_A50
-	depends on EXYNOS_DECON_LCD && EXYNOS_MIPI_DSIM
-	tristate "S6E3FA7 AMOLED FHD+ LCD driver"
+config EXYNOS_DECON_LCD_S6E3FA7_VOGUE
+	tristate "S6E3FA7_VOGUE LCD driver"
 
 config EXYNOS_DECON_LCD_EA8076_A50
-	depends on EXYNOS_DECON_LCD && EXYNOS_MIPI_DSIM
-	tristate "EA8076 AMOLED FHD+ LCD driver"
+	tristate "EA8076_A50 LCD driver"
 
 config EXYNOS_DECON_LCD_S6E3FC2_A80
-	depends on EXYNOS_DECON_LCD && EXYNOS_MIPI_DSIM
-	tristate "S6E3FC2 AMOLED FHD+ LCD driver"
+	tristate "S6E3FC2_A80 LCD driver"

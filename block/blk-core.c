@@ -1025,6 +1025,7 @@ out_exit_flush_rq:
 		q->exit_rq_fn(q, q->fq->flush_rq);
 out_free_flush_queue:
 	blk_free_flush_queue(q->fq);
+	q->fq = NULL;
 	return -ENOMEM;
 }
 EXPORT_SYMBOL(blk_init_allocated_queue);
@@ -1425,6 +1426,9 @@ static struct request *blk_old_get_request(struct request_queue *q,
 	/* q->queue_lock is unlocked at this point */
 	rq->__data_len = 0;
 	rq->__sector = (sector_t) -1;
+#ifdef CONFIG_BLK_DEV_CRYPT_DUN
+	rq->__dun = 0;
+#endif
 	rq->bio = rq->biotail = NULL;
 	return rq;
 }
@@ -1648,6 +1652,9 @@ bool bio_attempt_front_merge(struct request_queue *q, struct request *req,
 	bio->bi_next = req->bio;
 	req->bio = bio;
 
+#ifdef CONFIG_BLK_DEV_CRYPT_DUN
+	req->__dun = bio->bi_iter.bi_dun;
+#endif
 	req->__sector = bio->bi_iter.bi_sector;
 	req->__data_len += bio->bi_iter.bi_size;
 	req->ioprio = ioprio_best(req->ioprio, bio_prio(bio));
@@ -1790,6 +1797,9 @@ void blk_init_request_from_bio(struct request *req, struct bio *bio)
 		req->cmd_flags |= REQ_FAILFAST_MASK;
 
 	req->__sector = bio->bi_iter.bi_sector;
+#ifdef CONFIG_BLK_DEV_CRYPT_DUN
+	req->__dun = bio->bi_iter.bi_dun;
+#endif
 	if (ioprio_valid(bio_prio(bio)))
 		req->ioprio = bio_prio(bio);
 	else if (ioc)
@@ -2794,8 +2804,13 @@ bool blk_update_request(struct request *req, blk_status_t error,
 	req->__data_len -= total_bytes;
 
 	/* update sector only for requests with clear definition of sector */
-	if (!blk_rq_is_passthrough(req))
+	if (!blk_rq_is_passthrough(req)) {
 		req->__sector += total_bytes >> 9;
+#ifdef CONFIG_BLK_DEV_CRYPT_DUN
+		if (req->__dun)
+			req->__dun += total_bytes >> 12;
+#endif
+	}
 
 	/* mixed attributes always follow the first bio */
 	if (req->rq_flags & RQF_MIXED_MERGE) {
@@ -3159,6 +3174,9 @@ static void __blk_rq_prep_clone(struct request *dst, struct request *src)
 	dst->cpu = src->cpu;
 	dst->__sector = blk_rq_pos(src);
 	dst->__data_len = blk_rq_bytes(src);
+#ifdef CONFIG_BLK_DEV_CRYPT_DUN
+	dst->__dun = blk_rq_dun(src);
+#endif
 	if (src->rq_flags & RQF_SPECIAL_PAYLOAD) {
 		dst->rq_flags |= RQF_SPECIAL_PAYLOAD;
 		dst->special_vec = src->special_vec;

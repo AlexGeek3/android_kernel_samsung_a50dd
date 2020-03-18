@@ -14,7 +14,7 @@
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
  *  See http://www.gnu.org/licenses/gpl-2.0.html for more details.
  */
-#define DEBUG
+
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/version.h>
@@ -33,81 +33,9 @@ struct codec_reg_val {
 	u32 data;
 };
 
-static const struct codec_reg_val e1_reg_inits[] = {
-	{ RT5510_REG_WDT_CTRL, 0x80, 0x00 },
-	{ RT5510_REG_SPS_CTRL, 0x01, 0x00 },
-	{ RT5510_REG_HPF1_COEF, 0xffffffff, 0x7fdb7ffe },
-	{ RT5510_REG_HPF2_COEF, 0xffffffff, 0x7fdb7ffe },
-	{ RT5510_REG_SIG_GAIN, 0xff, 0x7b },
-	{ RT5510_REG_PWM_CTRL, 0x08, 0x00 },
-	{ RT5510_REG_TDM_CFG3, 0x400, 0x400 },
-	{ RT5510_REG_AUDIO_IN2_SEL, 0x1c, 0x04 },
-	{ RT5510_REG_RESV1, 0xc0, 0x00 },
-	{ RT5510_REG_RESV2, 0xe0, 0x20 },
-	{ RT5510_REG_RESV3, 0xc0, 0x80 },
-	{ RT5510_REG_RESV11, 0x0c, 0x00 },
-	{ RT5510_REG_RESV17, 0x7777, 0x7272 },
-	{ RT5510_REG_RESV19, 0x08, 0x08 },
-	{ RT5510_REG_RESV21, 0x8f, 0x0f },
-	{ RT5510_REG_RESV31, 0x03, 0x03 },
-	{ RT5510_REG_RESV40, 0x01, 0x00 },
-};
-
-static const struct codec_reg_val e2_reg_inits[] = {
-	{ RT5510_REG_WDT_CTRL, 0x80, 0x00 },
-	{ RT5510_REG_SPS_CTRL, 0x01, 0x01 },
-	{ RT5510_REG_AUDIO_IN2_SEL, 0x1c, 0x04 },
-	{ RT5510_REG_RESV11, 0x0c, 0x00 },
-	{ RT5510_REG_RESV31, 0x03, 0x03 },
-	{ RT5510_REG_RESV40, 0x01, 0x00 },
-	{ RT5510_REG_RESV0, 0x44, 0x04 },
-	{ RT5510_REG_RESV17, 0x7777, 0x7273 },
-	{ RT5510_REG_RESV16, 0x07, 0x03 },
-	{ RT5510_REG_DRE_CORASE, 0xe0, 0x20 },
-	{ RT5510_REG_ADDA_CLOCK, 0xff, 0x70 },
-	{ RT5510_REG_RESV21, 0xff, 0x20 },
-	{ RT5510_REG_DRE_THDMODE, 0xff, 0xa2 },
-	{ RT5510_REG_RESV23, 0xffff, 0x17f8 },
-	{ RT5510_REG_PWM_CTRL, 0xff, 0x04 },
-	{ RT5510_REG_INTERNAL_CFG, 0xff, 0x42 },
-	{ RT5510_REG_ADC_USB_MODE, 0xff, 0x00 },
-	{ RT5510_REG_PROTECTION_CFG, 0xff, 0x1d },
-	{ RT5510_REG_HPF1_COEF, 0xffffffff, 0x7fdb7ffe },
-	{ RT5510_REG_HPF2_COEF, 0xffffffff, 0x7fdb7ffe },
-	{ RT5510_REG_SIGMAX, 0xffff, 0x7fff },
-	{ RT5510_REG_DA_GAIN, 0xffff, 0x0116 },
-	{ RT5510_REG_SIG_GAIN, 0xff, 0x58 },
-	{ RT5510_REG_RESV6, 0xff, 0xce },
-};
-
-static const struct codec_reg_val e3_reg_inits[] = {
-	{ RT5510_REG_WDT_CTRL, 0x80, 0x00 },
-	{ RT5510_REG_SPS_CTRL, 0x01, 0x01 },
-	{ RT5510_REG_AUDIO_IN2_SEL, 0x1c, 0x04 },
-	{ RT5510_REG_RESV11, 0x0c, 0x00 },
-	{ RT5510_REG_RESV31, 0x03, 0x03 },
-	{ RT5510_REG_RESV40, 0x01, 0x00 },
-	{ RT5510_REG_RESV0, 0x44, 0x04 },
-	{ RT5510_REG_RESV17, 0x7777, 0x7273 },
-	{ RT5510_REG_RESV16, 0x07, 0x03 },
-	{ RT5510_REG_DRE_CORASE, 0xe0, 0x20 },
-	{ RT5510_REG_ADDA_CLOCK, 0xff, 0x70 },
-	{ RT5510_REG_RESV21, 0xff, 0x20 },
-	{ RT5510_REG_DRE_THDMODE, 0xff, 0xa2 },
-	{ RT5510_REG_RESV23, 0xffff, 0x17f8 },
-	{ RT5510_REG_PWM_CTRL, 0xff, 0x04 },
-	{ RT5510_REG_INTERNAL_CFG, 0xff, 0x42 },
-	{ RT5510_REG_ADC_USB_MODE, 0xff, 0x00 },
-	{ RT5510_REG_PROTECTION_CFG, 0xff, 0x1d },
-	{ RT5510_REG_HPF1_COEF, 0xffffffff, 0x7fdb7ffe },
-	{ RT5510_REG_HPF2_COEF, 0xffffffff, 0x7fdb7ffe },
-	{ RT5510_REG_SIG_GAIN, 0xff, 0x58 },
-	{ RT5510_REG_RESV6, 0xff, 0xce },
-};
-
 static const struct codec_reg_val e4_reg_inits[] = {
 	{ RT5510_REG_WDT_CTRL, 0x80, 0x00 },
-	{ RT5510_REG_SPS_CTRL, 0x01, 0x01 },
+	{ RT5510_REG_SPS_CTRL, 0x01, 0x00 },
 	{ RT5510_REG_AUDIO_IN2_SEL, 0x1c, 0x04 },
 	{ RT5510_REG_RESV11, 0x0c, 0x00 },
 	{ RT5510_REG_RESV31, 0x03, 0x03 },
@@ -119,7 +47,7 @@ static const struct codec_reg_val e4_reg_inits[] = {
 	{ RT5510_REG_DRE_CORASE, 0xe0, 0x20 },
 	{ RT5510_REG_ADDA_CLOCK, 0xff, 0x70 },
 	{ RT5510_REG_RESV21, 0xff, 0x20 },
-	{ RT5510_REG_DRE_THDMODE, 0xff, 0xa2 },
+	{ RT5510_REG_DRE_THDMODE, 0xff, 0x40 },
 	{ RT5510_REG_RESV23, 0xffff, 0x17f8 },
 	{ RT5510_REG_PWM_CTRL, 0xff, 0x15 },
 	{ RT5510_REG_ADC_USB_MODE, 0xff, 0x00 },
@@ -128,6 +56,10 @@ static const struct codec_reg_val e4_reg_inits[] = {
 	{ RT5510_REG_HPF2_COEF, 0xffffffff, 0x7fdb7ffe },
 	{ RT5510_REG_SIG_GAIN, 0xff, 0x58 },
 	{ RT5510_REG_RESV6, 0xff, 0xce },
+	{ RT5510_REG_SIGMAX, 0xffff, 0x7fff },
+	{ RT5510_REG_DA_GAIN, 0xffff, 0x0116 },
+	{ RT5510_REG_TDM_CFG3, 0x1800, 0x0800 },
+	{ RT5510_REG_DRE_CTRL, 0x1f, 0x07 },
 };
 
 static unsigned int rt5510_codec_io_read(struct snd_soc_codec *codec,
@@ -275,23 +207,12 @@ level_change_skip:
 
 static int rt5510_codec_init_setting(struct snd_soc_codec *codec)
 {
-	struct rt5510_chip *chip = snd_soc_codec_get_drvdata(codec);
 	const struct codec_reg_val *init_table;
 	int i, len, ret = 0;
 
-	if (chip->chip_rev >= 0x01e2) {
 		init_table = e4_reg_inits;
 		len = ARRAY_SIZE(e4_reg_inits);
-	} else if (chip->chip_rev >= 0x00e2) {
-		init_table = e3_reg_inits;
-		len = ARRAY_SIZE(e3_reg_inits);
-	} else if (chip->chip_rev >= 0x00e1) {
-		init_table = e2_reg_inits;
-		len = ARRAY_SIZE(e2_reg_inits);
-	} else {
-		init_table = e1_reg_inits;
-		len = ARRAY_SIZE(e1_reg_inits);
-	}
+
 	for (i = 0; i < len; i++) {
 		ret = snd_soc_update_bits(codec, init_table[i].addr,
 					init_table[i].mask, init_table[i].data);
@@ -385,6 +306,19 @@ static int rt5510_codec_probe(struct snd_soc_codec *codec)
 		dev_err(codec->dev, "create param device fail\n");
 		return ret;
 	}
+#ifdef CONFIG_SND_RICHTEK_SPM
+	/* internal use for calibration */
+	ret = snd_soc_read(codec, RT5510_REG_CALI_T0);
+	if (ret < 0)
+		return ret;
+	chip->richtek_spm.t0 = (u32) ((ret & 0x07) + 20);
+	ret = devm_richtek_spm_classdev_register(codec->dev,
+						 &chip->richtek_spm);
+	if (ret < 0) {
+		dev_err(codec->dev, "register richtek spm classdev fail\n");
+		return ret;
+	}
+#endif /* CONFIG_SND_RICHTEK_SPM */
 	chip->codec = codec;
 	dev_info(codec->dev, "%s--\n", __func__);
 	return 0;
@@ -437,8 +371,20 @@ static int rt5510_codec_classd_event(struct snd_soc_dapm_widget *w,
 			dev_err(codec->dev, "enable voltage sensing fail\n");
 			return ret;
 		}
+#ifdef CONFIG_SND_RICHTEK_SPM
+		ret = richtek_spm_classdev_trigger_ampon(&chip->richtek_spm);
+		if (ret < 0)
+			dev_err(codec->dev, "trigger spm device ampon fail\n");
+#endif /* CONFIG_SND_RICHTEK_SPM */
+		dev_info(codec->dev, "rt5510 amp on\n");
 		break;
 	case SND_SOC_DAPM_PRE_PMD:
+		dev_info(codec->dev, "rt5510 amp off\n");
+#ifdef CONFIG_SND_RICHTEK_SPM
+		ret = richtek_spm_classdev_trigger_ampoff(&chip->richtek_spm);
+		if (ret < 0)
+			dev_err(codec->dev, "trigger spm device ampoff fail\n");
+#endif /* CONFIG_SND_RICHTEK_SPM */
 		/* voltage sensing disable */
 		ret = snd_soc_update_bits(codec, RT5510_REG_RESV7, 0x04, 0x00);
 		if (ret < 0) {
@@ -631,6 +577,8 @@ static int rt5510_codec_aif_prepare(struct snd_pcm_substream *substream,
 static int rt5510_codec_aif_hw_params(struct snd_pcm_substream *substream,
 	struct snd_pcm_hw_params *hw_params, struct snd_soc_dai *dai)
 {
+	struct snd_soc_dapm_context *dapm =
+				     snd_soc_component_get_dapm(dai->component);
 	int word_len = params_physical_width(hw_params);
 	int aud_bit = params_width(hw_params);
 	u16 reg_data = 0;
@@ -674,7 +622,21 @@ static int rt5510_codec_aif_hw_params(struct snd_pcm_substream *substream,
 		return ret;
 	}
 	dev_dbg(dai->dev, "%s: --\n", __func__);
-	return 0;
+	return snd_soc_dapm_enable_pin(dapm, "SPK");
+}
+
+static int rt5510_codec_aif_hw_free(struct snd_pcm_substream *substream,
+				    struct snd_soc_dai *dai)
+{
+	struct snd_soc_dapm_context *dapm =
+				     snd_soc_component_get_dapm(dai->component);
+	int ret;
+
+	dev_dbg(dai->dev, "%s\n", __func__);
+	ret = snd_soc_dapm_disable_pin(dapm, "SPK");
+	if (ret < 0)
+		return ret;
+	return snd_soc_dapm_sync(dapm);
 }
 
 static int rt5510_codec_aif_trigger(struct snd_pcm_substream *substream,
@@ -692,6 +654,7 @@ static const struct snd_soc_dai_ops rt5510_codec_aif_ops = {
 	.shutdown = rt5510_codec_aif_shutdown,
 	.prepare = rt5510_codec_aif_prepare,
 	.hw_params = rt5510_codec_aif_hw_params,
+	.hw_free = rt5510_codec_aif_hw_free,
 	.trigger = rt5510_codec_aif_trigger,
 };
 
@@ -906,4 +869,4 @@ module_i2c_driver(rt5510_i2c_driver);
 MODULE_AUTHOR("CY_Huang <cy_huang@richtek.com>");
 MODULE_DESCRIPTION("RT5510 SPKAMP Driver");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("1.0.2_G");
+MODULE_VERSION("1.0.6_S");

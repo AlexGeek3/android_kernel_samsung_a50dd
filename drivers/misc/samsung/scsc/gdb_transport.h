@@ -32,6 +32,9 @@ struct gdb_transport;
 enum gdb_transport_enum {
 	GDB_TRANSPORT_R4 = 0,
 	GDB_TRANSPORT_M4,
+#ifdef CONFIG_SCSC_MX450_GDB_SUPPORT
+	GDB_TRANSPORT_M4_1,
+#endif
 };
 /**
  * Transport channel callback handler. This will be invoked each time a message on a channel is

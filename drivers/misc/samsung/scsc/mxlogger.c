@@ -27,6 +27,42 @@ static bool mxlogger_disabled;
 module_param(mxlogger_disabled, bool, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(mxlogger_disabled, "Disable MXLOGGER Configuration. Effective only at next WLBT boot.");
 
+static bool mxlogger_manual_layout;
+module_param(mxlogger_manual_layout, bool, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(mxlogger_manual_layout, "User owns the buffer layout. Only sync buffer will be allocated");
+
+static int mxlogger_manual_total_mem = MXL_POOL_SZ - MXLOGGER_SYNC_SIZE - sizeof(struct mxlogger_config_area);
+module_param(mxlogger_manual_total_mem , int, S_IRUGO);
+MODULE_PARM_DESC(mxlogger_manual_total_mem, "Available memory when mxlogger_manual_layout is enabled");
+
+static int mxlogger_manual_imp;
+module_param(mxlogger_manual_imp , int, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(mxlogger_manual_imp, "size for IMP buffer when mxlogger_manual_layout is enabled");
+
+static int mxlogger_manual_rsv_common;
+module_param(mxlogger_manual_rsv_common , int, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(mxlogger_manual_rsv_common, "size for RSV COMMON buffer when mxlogger_manual_layout is enabled");
+
+static int mxlogger_manual_rsv_bt;
+module_param(mxlogger_manual_rsv_bt , int, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(mxlogger_manual_rsv_bt, "size for RSV BT buffer when mxlogger_manual_layout is enabled");
+
+static int mxlogger_manual_rsv_wlan = MXL_POOL_SZ - MXLOGGER_SYNC_SIZE - sizeof(struct mxlogger_config_area);
+module_param(mxlogger_manual_rsv_wlan , int, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(mxlogger_manual_rsv_wlan, "size for RSV WLAN buffer when mxlogger_manual_layout is enabled");
+
+static int mxlogger_manual_rsv_radio;
+module_param(mxlogger_manual_rsv_radio , int, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(mxlogger_manual_rsv_radio, "size for RSV RADIO buffer when mxlogger_manual_layout is enabled");
+
+static int mxlogger_manual_mxlog;
+module_param(mxlogger_manual_mxlog , int, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(mmxlogger_manual_mxlog, "size for MXLOG buffer when mxlogger_manual_layout is enabled");
+
+static int mxlogger_manual_udi;
+module_param(mxlogger_manual_udi , int, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(mxlogger_manual_udi, "size for UDI buffer when mxlogger_manual_layout is enabled");
+
 bool mxlogger_set_enabled_status(bool enable)
 {
 	mxlogger_disabled = !enable;
@@ -565,14 +601,28 @@ int mxlogger_init(struct scsc_mx *mx, struct mxlogger *mxlogger, uint32_t mem_sz
 	size_t remaining_mem;
 	size_t udi_mxl_mem_sz;
 	struct mxlogger_node *mn;
+	uint32_t manual_total;
 
 	MEM_LAYOUT_CHECK();
 
 	mxlogger->configured = false;
 
-	if (mem_sz <= (sizeof(struct mxlogger_config_area) + MXLOGGER_TOTAL_FIX_BUF)) {
-		SCSC_TAG_ERR(MXMAN, "Insufficient memory allocation\n");
-		return -EIO;
+	if (!mxlogger_manual_layout) {
+		if (mem_sz <= (sizeof(struct mxlogger_config_area) + MXLOGGER_TOTAL_FIX_BUF)) {
+			SCSC_TAG_ERR(MXMAN, "Insufficient memory allocation\n");
+			return -EIO;
+		}
+	} else {
+		manual_total = mxlogger_manual_imp + mxlogger_manual_rsv_common +
+			       mxlogger_manual_rsv_bt + mxlogger_manual_rsv_wlan +
+			       mxlogger_manual_rsv_radio + mxlogger_manual_mxlog +
+			       mxlogger_manual_udi;
+
+		SCSC_TAG_INFO(MXMAN, "MXLOGGER Manual layout requested %d of total %d\n", manual_total, mxlogger_manual_total_mem);
+		if (manual_total > mxlogger_manual_total_mem)  {
+			SCSC_TAG_ERR(MXMAN, "Insufficient memory allocation for FW_layout\n");
+			return -EIO;
+		}
 	}
 
 	mxlogger->mx = mx;
@@ -617,27 +667,32 @@ int mxlogger_init(struct scsc_mx *mx, struct mxlogger *mxlogger, uint32_t mem_sz
 	cfg->bfds[MXLOGGER_IMP].location =
 		cfg->bfds[MXLOGGER_IMP - 1].location +
 		cfg->bfds[MXLOGGER_IMP - 1].size;
-	cfg->bfds[MXLOGGER_IMP].size = MXLOGGER_IMP_SIZE;
+	cfg->bfds[MXLOGGER_IMP].size =
+		mxlogger_manual_layout ? mxlogger_manual_imp : MXLOGGER_IMP_SIZE;
 
 	cfg->bfds[MXLOGGER_RESERVED_COMMON].location =
 		cfg->bfds[MXLOGGER_RESERVED_COMMON - 1].location +
 		cfg->bfds[MXLOGGER_RESERVED_COMMON - 1].size;
-	cfg->bfds[MXLOGGER_RESERVED_COMMON].size = MXLOGGER_RSV_COMMON_SZ;
+	cfg->bfds[MXLOGGER_RESERVED_COMMON].size =
+		mxlogger_manual_layout ? mxlogger_manual_rsv_common : MXLOGGER_RSV_COMMON_SZ;
 
 	cfg->bfds[MXLOGGER_RESERVED_BT].location =
 		cfg->bfds[MXLOGGER_RESERVED_BT - 1].location +
 		cfg->bfds[MXLOGGER_RESERVED_BT - 1].size;
-	cfg->bfds[MXLOGGER_RESERVED_BT].size = MXLOGGER_RSV_BT_SZ;
+	cfg->bfds[MXLOGGER_RESERVED_BT].size =
+		mxlogger_manual_layout ? mxlogger_manual_rsv_bt : MXLOGGER_RSV_BT_SZ;
 
 	cfg->bfds[MXLOGGER_RESERVED_WLAN].location =
 		cfg->bfds[MXLOGGER_RESERVED_WLAN - 1].location +
 		cfg->bfds[MXLOGGER_RESERVED_WLAN - 1].size;
-	cfg->bfds[MXLOGGER_RESERVED_WLAN].size = MXLOGGER_RSV_WLAN_SZ;
+	cfg->bfds[MXLOGGER_RESERVED_WLAN].size =
+		mxlogger_manual_layout ? mxlogger_manual_rsv_wlan : MXLOGGER_RSV_WLAN_SZ;
 
 	cfg->bfds[MXLOGGER_RESERVED_RADIO].location =
 		cfg->bfds[MXLOGGER_RESERVED_RADIO - 1].location +
 		cfg->bfds[MXLOGGER_RESERVED_RADIO - 1].size;
-	cfg->bfds[MXLOGGER_RESERVED_RADIO].size = MXLOGGER_RSV_RADIO_SZ;
+	cfg->bfds[MXLOGGER_RESERVED_RADIO].size =
+		mxlogger_manual_layout ? mxlogger_manual_rsv_radio : MXLOGGER_RSV_RADIO_SZ;
 
 	/* Compute buffer locations and size based on the remaining space */
 	remaining_mem = mem_sz - (sizeof(struct mxlogger_config_area) + MXLOGGER_TOTAL_FIX_BUF);
@@ -650,12 +705,14 @@ int mxlogger_init(struct scsc_mx *mx, struct mxlogger *mxlogger, uint32_t mem_sz
 	cfg->bfds[MXLOGGER_MXLOG].location =
 		cfg->bfds[MXLOGGER_MXLOG - 1].location +
 		cfg->bfds[MXLOGGER_MXLOG - 1].size;
-	cfg->bfds[MXLOGGER_MXLOG].size = udi_mxl_mem_sz;
+	cfg->bfds[MXLOGGER_MXLOG].size =
+		mxlogger_manual_layout ? mxlogger_manual_mxlog : udi_mxl_mem_sz;
 
 	cfg->bfds[MXLOGGER_UDI].location =
 		cfg->bfds[MXLOGGER_UDI - 1].location +
 		cfg->bfds[MXLOGGER_UDI - 1].size;
-	cfg->bfds[MXLOGGER_UDI].size = udi_mxl_mem_sz;
+	cfg->bfds[MXLOGGER_UDI].size =
+		mxlogger_manual_layout ? mxlogger_manual_udi : udi_mxl_mem_sz;
 
 	/* Save offset to buffers array */
 	mif->get_mifram_ref(mif, cfg->bfds, &cfg->config.bfds_ref);

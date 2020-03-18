@@ -49,6 +49,8 @@
 #define BSMHCP_EVENT_TYPE_NONE                  (0x00)
 #define BSMHCP_EVENT_TYPE_CONNECTED             (0x01)
 #define BSMHCP_EVENT_TYPE_DISCONNECTED          (0x02)
+#define BSMHCP_EVENT_TYPE_IQ_REPORT_ENABLED     (0x03)
+#define BSMHCP_EVENT_TYPE_IQ_REPORT_DISABLED    (0x04)
 
 #define BSMHCP_ACL_BC_FLAG_BCAST_NON            (0x00)
 #define BSMHCP_ACL_BC_FLAG_BCAST_ACTIVE         (0x40)
@@ -191,7 +193,7 @@ struct BSMHCP_TD_IQ_REPORTING_EVT {
 	uint8_t  cte_type;
 	uint8_t  slot_durations;
 	uint8_t  sample_count;
-	uint16_t reserved;
+	uint16_t event_count;
 	uint8_t  data[BSMHCP_IQ_REPORT_BUFFER_SIZE];
 };
 

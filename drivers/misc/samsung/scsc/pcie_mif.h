@@ -75,6 +75,9 @@
 
 /* from mx141 */
 #define SCSC_PCIE_NEWMSG2       0xD0
+#ifdef CONFIG_SCSC_MX450_GDB_SUPPORT
+#define SCSC_PCIE_NEWMSG3       0xD4
+#endif
 
 struct scsc_bar0_reg {
 	u32 NEWMSG;

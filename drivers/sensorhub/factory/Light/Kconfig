@@ -34,3 +34,14 @@ config SENSORS_SSP_LIGHT_TCS3701
 	  factory test.
 	  To compile this driver as a module, choose M here: the
 	  module will be called ssp.
+
+config SENSORS_SSP_LIGHT_VEML3328
+	tristate "Sensors ssp light veml3328"
+	default n
+	depends on SPI
+	help
+	  light veml3328 file for factory test in ssp driver.
+          If you say yes here you get light veml3328 support for
+	  factory test.
+	  To compile this driver as a module, choose M here: the
+	  module will be called ssp.	  

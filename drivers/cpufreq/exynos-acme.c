@@ -315,7 +315,7 @@ static int update_freq(struct exynos_cpufreq_domain *domain,
 		return 0;
 	}
 
-	ret = __cpufreq_driver_target(policy, freq, CPUFREQ_RELATION_H);
+	ret = cpufreq_driver_target(policy, freq, CPUFREQ_RELATION_H);
 	cpufreq_cpu_put(policy);
 
 	return ret;
@@ -1143,6 +1143,11 @@ static int init_dm(struct exynos_cpufreq_domain *domain,
 			return ret;
 	}
 
+	return 0;
+}
+
+static int register_dm_callback(struct exynos_cpufreq_domain *domain)
+{
 	return register_exynos_dm_freq_scaler(domain->dm_type, dm_scaler);
 }
 
@@ -1379,6 +1384,8 @@ static int __init exynos_cpufreq_init(void)
 	list_for_each_entry(domain, &domains, list) {
 		struct cpufreq_policy *policy;
 		enable_domain(domain);
+		if (register_dm_callback(domain))
+			pr_err("Couldn't register DM callback\n");
 		policy = cpufreq_cpu_get_raw(cpumask_first(&domain->cpus));
 		if (policy)
 			exynos_cpufreq_cooling_register(domain->dn, policy);

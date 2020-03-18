@@ -54,7 +54,7 @@
 #endif
 
 #if !defined(CONFIG_SOC_EXYNOS7872) && !defined(CONFIG_SOC_EXYNOS7570) \
-	&& !defined(CONFIG_SOC_EXYNOS7885) && !defined(CONFIG_SOC_EXYNOS9610)
+	&& !defined(CONFIG_SOC_EXYNOS7885) && !defined(CONFIG_SOC_EXYNOS9610) && !defined(CONFIG_SOC_EXYNOS9630)
 #error Target processor CONFIG_SOC_EXYNOS7570 or CONFIG_SOC_EXYNOS7872 or CONFIG_SOC_EXYNOS7885 or CONFIG_SOC_EXYNOS9610 not selected
 #endif
 
@@ -887,9 +887,6 @@ irqreturn_t platform_cfg_req_isr(int irq, void *data)
 
 	/* Signal triggering function that the IRQ arrived and CFG was done */
 	complete(&platform->cfg_ack);
-
-	/* Re-enable IRQ here to allow spurious interrupt to be tracked */
-	enable_irq(platform->wlbt_irq[PLATFORM_MIF_CFG_REQ].irq_num);
 
 	return IRQ_HANDLED;
 cfg_error:

@@ -233,6 +233,11 @@ config SND_SOC_ALL_CODECS
 
           If unsure select "N".
 
+config SND_RICHTEK_SPM
+	bool "Richtek SPM Class"
+	help
+	  Say Y here to enable Richtek SPM Class support.
+
 config SND_SOC_88PM860X
 	tristate
 

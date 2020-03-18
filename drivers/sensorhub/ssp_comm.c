@@ -12,7 +12,7 @@
 #define SSP_MSG_HEADER_SIZE 13
 
 void handle_packet(struct ssp_data *data, char *packet, int packet_size)
-{	
+{
 	u16 msg_length = 0;
 	u8 msg_cmd = 0, msg_subcmd = 0, msg_type = 0;
 	char *buffer;
@@ -20,7 +20,7 @@ void handle_packet(struct ssp_data *data, char *packet, int packet_size)
 	if(packet_size < SSP_MSG_HEADER_SIZE) {
 		ssp_infof("nanohub packet size is small/(%s)", packet);
 		return;
-	} 
+	}
 
 	msg_cmd = packet[0];
 	msg_type = packet[1];
@@ -66,11 +66,11 @@ void handle_packet(struct ssp_data *data, char *packet, int packet_size)
 					}
 					msg->buffer = kzalloc(msg->length, GFP_KERNEL);
 					memcpy(msg->buffer, packet + SSP_MSG_HEADER_SIZE, msg->length);
-					
+
 				} else {
 					msg->res = 0;
 				}
-			} 
+			}
 
 			if (msg->done != NULL && !completion_done(msg->done)) {
 				complete(msg->done);
@@ -82,7 +82,7 @@ void handle_packet(struct ssp_data *data, char *packet, int packet_size)
 exit:
 		mutex_unlock(&data->pending_mutex);
 	} else if (msg_cmd == CMD_REPORT) {
-                
+
 	    buffer = kzalloc(msg_length, GFP_KERNEL);
 		memcpy(buffer, &packet[SSP_MSG_HEADER_SIZE], msg_length);
 		parse_dataframe(data, buffer, msg_length);
@@ -104,11 +104,11 @@ static int do_transfer(struct ssp_data *data, struct ssp_msg *msg, int timeout)
 	mutex_lock(&data->comm_mutex);
 
 	if (!is_sensorhub_working(data)) {
-		ssp_errf("ssp shutdown, do not parse");
+		ssp_errf("sensorhub is not working");
 		mutex_unlock(&data->comm_mutex);
 		return -EIO;
 	}
-	
+
 	msg->timestamp = get_current_timestamp();
 	memcpy(ssp_cmd_data, msg, SSP_MSG_HEADER_SIZE);
 	if (msg->length > 0) {
@@ -212,16 +212,20 @@ int ssp_send_command(struct ssp_data *data, u8 cmd, u8 type, u8 subcmd,
 	msg->length = send_buf_len;
 
 	if (timeout > 0) {
-		if (send_buf != NULL) {
+		if (send_buf != NULL && send_buf_len != 0) {
 			msg->buffer = kzalloc(send_buf_len, GFP_KERNEL);
 			memcpy(msg->buffer, send_buf, send_buf_len);
 		} else {
-			msg->buffer = send_buf;
+			msg->length = 0;
 		}
 		msg->done = &done;
 	} else {
-		msg->buffer = kzalloc(send_buf_len, GFP_KERNEL);
-		memcpy(msg->buffer, send_buf, send_buf_len);
+		if (send_buf != NULL && send_buf_len != 0) {
+			msg->buffer = kzalloc(send_buf_len, GFP_KERNEL);
+			memcpy(msg->buffer, send_buf, send_buf_len);
+		} else {
+			msg->length = 0;
+		}
 		msg->done = NULL;
 	}
 
@@ -252,75 +256,52 @@ int ssp_send_command(struct ssp_data *data, u8 cmd, u8 type, u8 subcmd,
 	//mutex_unlock(&data->cmd_mutex);
 
 	if(status < 0) {
-		if(data->is_reset_started == false) {
-			recovery_mcu(data, RESET_KERNEL_COM_FAIL);
-		}
-		ssp_errf("status=%d, is_reset_started=%d", status, data->is_reset_started);
+		recovery_mcu(data, RESET_KERNEL_COM_FAIL);
+		ssp_errf("status=%d", status);
 	}
 	return status;
 }
 
-int make_command(struct ssp_data *data, u8 uInst,
-                 u8 sensor_type, u8 *send_buf, u16 uLength)
+static void get_tm(struct rtc_time *tm)
 {
-	char command, sub_cmd = 0;
+	struct timespec ts;
+
+	getnstimeofday(&ts);
+	rtc_time_to_tm(ts.tv_sec, tm);
+}
+
+int enable_sensor(struct ssp_data *data, unsigned int type, u8* buf, int buf_len)
+{
 	int ret = 0;
-	char *buffer = NULL;
 
-#if 0
-	if (data->fw_dl_state == FW_DL_STATE_DOWNLOADING) {
-		ssp_errf("Skip make command! DL state = %d", data->fw_dl_state);
-		return SUCCESS;
-	} else 
-#endif
-    if ((!(data->sensor_probe_state & (1ULL << sensor_type)))
-	           && (uInst <= CHANGE_DELAY)) {
-		ssp_errf("skip! - %u", sensor_type);
-		return FAIL;
-	}
-
-	switch (uInst) {
-	case REMOVE_SENSOR:
-		command = CMD_REMOVE;
-		break;
-	case ADD_SENSOR:
-		data->latest_timestamp[sensor_type] = get_current_timestamp();
-		command = CMD_ADD;
-		break;
-	case CHANGE_DELAY:
-		command = CMD_CHANGERATE;
-		break;
-	case GO_SLEEP:
-		command = CMD_SETVALUE;
-		sub_cmd = SCONTEXT_AP_STATUS_SLEEP;
-		//data->uLastAPState = SCONTEXT_AP_STATUS_SLEEP;
-		break;
-	case REMOVE_LIBRARY:
-		command = CMD_REMOVE;
-		break;
-	case ADD_LIBRARY:
-		command = CMD_ADD;
-		break;
-	default:
-		command = uInst;
-		break;
-	}
-
-	buffer = kzalloc(uLength, GFP_KERNEL);
-	memcpy(buffer, send_buf, uLength);
-
-	ret = ssp_send_command(data, command, sensor_type, sub_cmd, 0, buffer, uLength,
+	ret = ssp_send_command(data, CMD_ADD, type, 0, 0, buf, buf_len,
 	                       NULL, NULL);
 
-	if (ret != SUCCESS) {
-		ssp_errf("ssp_send_command Fail %d", ret);
-		goto exit;
+	if (ret < 0) {
+		ssp_errf("commnd error %d", ret);
+	} else {
+		data->en_info[type].enabled = true;
+		data->en_info[type].regi_time.timestamp = get_current_timestamp();
+		get_tm(&(data->en_info[type].regi_time.tm));
 	}
 
-exit:
-	if (buffer != NULL) {
-		kfree(buffer);
+	return ret;
+}
+
+int disable_sensor(struct ssp_data *data, unsigned int type, u8 *buf, int buf_len)
+{
+	int ret = 0;
+	ret = ssp_send_command(data, CMD_REMOVE, type, 0, 0, buf, buf_len,
+	                       NULL, NULL);
+
+	if (ret < 0) {
+		ssp_errf("commnd error %d", ret);
+	} else {
+		data->en_info[type].enabled = false;
+		data->en_info[type].unregi_time.timestamp = get_current_timestamp();
+		get_tm(&(data->en_info[type].unregi_time.tm));
 	}
+
 	return ret;
 }
 

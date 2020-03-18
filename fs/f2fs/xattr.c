@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * fs/f2fs/xattr.c
  *
@@ -13,15 +14,12 @@
  *  suggestion of Luka Renko <luka.renko@hermes.si>.
  * xattr consolidation Copyright (c) 2004 James Morris <jmorris@redhat.com>,
  *  Red Hat Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #include <linux/rwsem.h>
 #include <linux/f2fs_fs.h>
 #include <linux/security.h>
 #include <linux/posix_acl_xattr.h>
+#include <linux/fslog.h>
 #include "f2fs.h"
 #include "xattr.h"
 
@@ -37,9 +35,6 @@ static int f2fs_xattr_generic_get(const struct xattr_handler *handler,
 			return -EOPNOTSUPP;
 		break;
 	case F2FS_XATTR_INDEX_TRUSTED:
-		if (!capable(CAP_SYS_ADMIN))
-			return -EPERM;
-		break;
 	case F2FS_XATTR_INDEX_SECURITY:
 		break;
 	default:
@@ -62,9 +57,6 @@ static int f2fs_xattr_generic_set(const struct xattr_handler *handler,
 			return -EOPNOTSUPP;
 		break;
 	case F2FS_XATTR_INDEX_TRUSTED:
-		if (!capable(CAP_SYS_ADMIN))
-			return -EPERM;
-		break;
 	case F2FS_XATTR_INDEX_SECURITY:
 		break;
 	default:
@@ -100,12 +92,22 @@ static int f2fs_xattr_advise_set(const struct xattr_handler *handler,
 		const char *name, const void *value,
 		size_t size, int flags)
 {
+	unsigned char old_advise = F2FS_I(inode)->i_advise;
+	unsigned char new_advise;
+
 	if (!inode_owner_or_capable(inode))
 		return -EPERM;
 	if (value == NULL)
 		return -EINVAL;
 
-	F2FS_I(inode)->i_advise |= *(char *)value;
+	new_advise = *(char *)value;
+	if (new_advise & ~FADVISE_MODIFIABLE_BITS)
+		return -EINVAL;
+
+	new_advise = new_advise & FADVISE_MODIFIABLE_BITS;
+	new_advise |= old_advise & ~FADVISE_MODIFIABLE_BITS;
+
+	F2FS_I(inode)->i_advise = new_advise;
 	f2fs_mark_inode_dirty_sync(inode, true);
 	return 0;
 }
@@ -584,6 +586,16 @@ static int __f2fs_setxattr(struct inode *inode, int index,
 
 	if (size > MAX_VALUE_LEN(inode))
 		return -E2BIG;
+
+	if (!strcmp(name, "selinux")) {
+		if (!value || !strcmp(value, "") ||
+				strstr(value, "unlabeled")) {
+			SE_LOG("%s : ino(%lu) label set, value : %s.",
+					__func__, inode->i_ino, value?value:"NuLL");
+			dump_stack();
+			fslog_kmsg_selog(__func__, 12);
+		}			
+	}
 
 	error = read_all_xattrs(inode, ipage, &base_addr);
 	if (error)

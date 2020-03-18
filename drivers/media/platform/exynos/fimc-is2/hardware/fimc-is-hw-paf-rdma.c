@@ -262,7 +262,7 @@ static int fimc_is_hw_paf_shot(struct fimc_is_hw_ip *hw_ip, struct fimc_is_frame
 	struct fimc_is_hw_paf *hw_paf;
 	struct is_region *region;
 	struct paf_rdma_param *param;
-	u32 lindex, hindex;
+	u32 lindex, hindex, instance;
 #if defined(CONFIG_CAMERA_PAFSTAT)
 	void __iomem *paf_rdma_addr;
 	void __iomem *paf_ctx_addr;
@@ -271,19 +271,20 @@ static int fimc_is_hw_paf_shot(struct fimc_is_hw_ip *hw_ip, struct fimc_is_frame
 	FIMC_BUG(!hw_ip);
 	FIMC_BUG(!frame);
 
-	msdbgs_hw(2, "[F:%d]shot\n", frame->instance, hw_ip, frame->fcount);
+	instance = frame->instance;
+	msdbgs_hw(2, "[F:%d]shot\n", instance, hw_ip, frame->fcount);
 
 	if (!test_bit_variables(hw_ip->id, &hw_map))
 		return 0;
 
 	if (!test_bit(HW_INIT, &hw_ip->state)) {
-		mserr_hw("not initialized!!", frame->instance, hw_ip);
+		mserr_hw("not initialized!!", instance, hw_ip);
 		return -EINVAL;
 	}
 
 	FIMC_BUG(!hw_ip->priv_info);
 	hw_paf = (struct fimc_is_hw_paf *)hw_ip->priv_info;
-	region = hw_ip->region[frame->instance];
+	region = hw_ip->region[instance];
 	FIMC_BUG(!region);
 
 	FIMC_BUG(!frame->shot);
@@ -292,8 +293,8 @@ static int fimc_is_hw_paf_shot(struct fimc_is_hw_ip *hw_ip, struct fimc_is_frame
 	lindex = frame->shot->ctl.vendor_entry.lowIndexParam;
 	hindex = frame->shot->ctl.vendor_entry.highIndexParam;
 
-	if (hw_ip->internal_fcount != 0) {
-		hw_ip->internal_fcount = 0;
+	if (hw_ip->internal_fcount[instance] != 0) {
+		hw_ip->internal_fcount[instance] = 0;
 		lindex |= LOWBIT_OF(PARAM_PAF_DMA_INPUT);
 		lindex |= LOWBIT_OF(PARAM_PAF_OTF_OUTPUT);
 
@@ -302,13 +303,13 @@ static int fimc_is_hw_paf_shot(struct fimc_is_hw_ip *hw_ip, struct fimc_is_frame
 	}
 
 	/* DMA settings */
-	param = &hw_ip->region[frame->instance]->parameter.paf;
+	param = &hw_ip->region[instance]->parameter.paf;
 	if (param->dma_input.cmd != DMA_INPUT_COMMAND_DISABLE) {
 		for (i = 0; i < frame->planes; i++) {
 			hw_paf->input_dva[i] = frame->dvaddr_buffer[i];
 			if (frame->dvaddr_buffer[i] == 0) {
 				msinfo_hw("[F:%d]dvaddr_buffer[%d] is zero\n",
-					frame->instance, hw_ip, frame->fcount, i);
+					instance, hw_ip, frame->fcount, i);
 				FIMC_BUG(1);
 			}
 		}
@@ -324,7 +325,7 @@ static int fimc_is_hw_paf_shot(struct fimc_is_hw_ip *hw_ip, struct fimc_is_frame
 
 	ret = fimc_is_hw_paf_update_param(hw_ip,
 		region, param,
-		lindex, hindex, frame->instance);
+		lindex, hindex, instance);
 
 	set_bit(HW_PAFSTAT_RDMA_CFG, &hw_ip->state);
 
@@ -379,7 +380,7 @@ int fimc_is_hw_paf_update_param(struct fimc_is_hw_ip *hw_ip, struct is_region *r
 	int ret = 0;
 	struct fimc_is_hw_paf *hw_paf;
 	u32 hw_format, bitwidth;
-	u32 width, height;
+	u32 width, height, pix_stride;
 #if defined(CONFIG_CAMERA_PAFSTAT)
 	u32 paf_ch;
 	void __iomem *paf_ctx_addr;
@@ -396,8 +397,9 @@ int fimc_is_hw_paf_update_param(struct fimc_is_hw_ip *hw_ip, struct is_region *r
 
 	hw_format = param->dma_input.format;
 	bitwidth = param->dma_input.bitwidth;
-	width = param->dma_input.width;
-	height = param->dma_input.height;
+	width = param->dma_input.dma_crop_width;
+	height = param->dma_input.dma_crop_height;
+	pix_stride = param->dma_input.width;
 
 #if defined(CONFIG_CAMERA_PAFSTAT)
 	paf_ch = (hw_ip->id == DEV_HW_PAF1) ? 1 : 0;
@@ -411,7 +413,7 @@ int fimc_is_hw_paf_update_param(struct fimc_is_hw_ip *hw_ip, struct is_region *r
 
 	fimc_is_hw_paf_common_config(hw_paf->paf_core_regs, paf_ctx_addr, paf_ch, width, height);
 	fimc_is_hw_paf_rdma_set_addr(paf_rdma_addr, hw_paf->input_dva[0]);
-	fimc_is_hw_paf_rdma_config(paf_rdma_addr, hw_format, bitwidth, width, height);
+	fimc_is_hw_paf_rdma_config(paf_rdma_addr, hw_format, bitwidth, width, height, pix_stride);
 #endif
 
 	return ret;
@@ -465,7 +467,6 @@ int fimc_is_hw_paf_probe(struct fimc_is_hw_ip *hw_ip, struct fimc_is_interface *
 	hw_ip->itf  = itf;
 	hw_ip->itfc = itfc;
 	atomic_set(&hw_ip->fcount, 0);
-	hw_ip->internal_fcount = 0;
 	hw_ip->is_leader = true;
 	atomic_set(&hw_ip->status.Vvalid, V_BLANK);
 	atomic_set(&hw_ip->status.otf_start, 0);

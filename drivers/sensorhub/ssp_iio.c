@@ -102,10 +102,10 @@ static void ssp_iio_push_buffers(struct iio_dev *indio_dev, u64 timestamp,
 	mutex_unlock(&indio_dev->mlock);
 }
 
+#ifdef CONFIG_SENSORS_SSP_PROXIMITY
 static void report_prox_raw_data(struct ssp_data *data, int type,
                                  struct sensor_value *proxrawdata)
 {
-#ifdef CONFIG_SENSORS_SSP_PROXIMITY
 	if (data->prox_raw_avg[PROX_RAW_NUM]++ >= PROX_AVG_READ_NUM) {
 		data->prox_raw_avg[PROX_RAW_SUM] /= PROX_AVG_READ_NUM;
 		data->buf[type].prox_raw[1] = (u16)data->prox_raw_avg[1];
@@ -131,9 +131,18 @@ static void report_prox_raw_data(struct ssp_data *data, int type,
 	}
 
 	data->buf[type].prox_raw[0] = proxrawdata->prox_raw[0];
-#endif
 }
 
+static void report_prox_cal_data(struct ssp_data *data, int type,
+                                 struct sensor_value *p_cal_data)
+{
+	data->prox_thresh[0] = p_cal_data->prox_cal[0];
+	data->prox_thresh[1] = p_cal_data->prox_cal[1];
+	ssp_info("prox thresh %u %u", data->prox_thresh[0], data->prox_thresh[1]);
+	
+	proximity_calibration_off(data);
+}
+#endif
 
 void report_sensor_data(struct ssp_data *data, int type,
                         struct sensor_value *event)
@@ -141,10 +150,14 @@ void report_sensor_data(struct ssp_data *data, int type,
 	if (type == SENSOR_TYPE_PROXIMITY) {
 		ssp_info("Proximity Sensor Detect : %u, raw : %u",
 		         event->prox, event->prox_ex);
-
+#ifdef CONFIG_SENSORS_SSP_PROXIMITY
 	} else if (type == SENSOR_TYPE_PROXIMITY_RAW) {
 		report_prox_raw_data(data, type, event);
 		return;
+	} else if (type == SENSOR_TYPE_PROXIMITY_CALIBRATION) {
+		report_prox_cal_data(data, type, event);
+		return;
+#endif
 	} else if (type == SENSOR_TYPE_LIGHT) {
 #ifdef CONFIG_SENSORS_SSP_LIGHT
 		if (data->light_log_cnt < 3) {
@@ -159,9 +172,8 @@ void report_sensor_data(struct ssp_data *data, int type,
 		}
 	} else if (type == SENSOR_TYPE_LIGHT_CCT) {
 		if (data->light_cct_log_cnt < 3) {
-			ssp_info("Light cct Sensor : lux=%u brightness=%u r=%d g=%d b=%d c=%d atime=%d again=%d",
+			ssp_info("Light cct Sensor : lux=%u r=%d g=%d b=%d c=%d atime=%d again=%d",
 				     data->buf[SENSOR_TYPE_LIGHT_CCT].lux,
-				     data->buf[SENSOR_TYPE_LIGHT_CCT].brightness,
 			         data->buf[SENSOR_TYPE_LIGHT_CCT].r, data->buf[SENSOR_TYPE_LIGHT_CCT].g,
 			         data->buf[SENSOR_TYPE_LIGHT_CCT].b,
 			         data->buf[SENSOR_TYPE_LIGHT_CCT].w, data->buf[SENSOR_TYPE_LIGHT_CCT].a_time,

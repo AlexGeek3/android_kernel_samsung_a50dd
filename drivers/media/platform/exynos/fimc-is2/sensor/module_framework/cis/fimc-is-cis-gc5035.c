@@ -45,6 +45,7 @@
 
 #define SENSOR_NAME "GC5035"
 #define GET_CLOSEST(x1, x2, x3) (x3 - x1 >= x2 - x3 ? x2 : x1)
+#define MULTIPLE_OF_4(val) ((val >> 2) << 2)
 
 #define POLL_TIME_MS (1)
 #define POLL_TIME_US (1000)
@@ -663,23 +664,23 @@ int sensor_gc5035_cis_stream_on(struct v4l2_subdev *subdev)
 		err("[%s] sensor_gc5035_cis_group_param_hold_func fail\n", __func__);
 
 	/* Sensor Dual sync on/off */
-#if 0
-	if(test_bit(FIMC_IS_SENSOR_OPEN, &(core->sensor[0].state))){
-		info("[%s]dual sync slave mode\n", __func__);
+#ifdef DISABLE_DUAL_SYNC
+	/* Delay for single mode */
+	msleep(50);
+#else
+	if (test_bit(FIMC_IS_SENSOR_OPEN, &(core->sensor[0].state))) {
+		info("[%s] dual sync slave mode\n", __func__);
 		ret = sensor_cis_set_registers_addr8(subdev, sensor_gc5035_fsync_slave, sensor_gc5035_fsync_slave_size);
 		if (ret < 0)
 			err("[%s] sensor_gc5035_fsync_slave fail\n", __func__);
+
+		/* The delay which can change the frame-length of first frame was removed here*/
 	}
 	else{
-		info("[%s] master mode\n", __func__);
-		ret = sensor_cis_set_registers_addr8(subdev, sensor_gc5035_fsync_master, sensor_gc5035_fsync_master_size);
-
-		if (ret < 0)
-			err("[%s] sensor_gc5035_fsync_master fail\n", __func__);
+		/* Delay for single mode */
+		msleep(50);
 	}
-#endif
-
-	msleep(50);
+#endif /* DISABLE_DUAL_SYNC */
 
 	/* Page Selection */
 	ret = fimc_is_sensor_addr8_write8(client, 0xFE, 0x00);
@@ -693,7 +694,16 @@ int sensor_gc5035_cis_stream_on(struct v4l2_subdev *subdev)
 		goto p_err;
 	}
 
+#ifdef DISABLE_DUAL_SYNC
+	/* Delay for single mode */
 	msleep(50);
+#else
+	if (!test_bit(FIMC_IS_SENSOR_OPEN, &(core->sensor[0].state))) {
+		/* Delay for single mode */
+		msleep(50);
+	}
+#endif /* DISABLE_DUAL_SYNC */
+
 	cis_data->stream_on = true;
 
 #ifdef DEBUG_SENSOR_TIME
@@ -848,6 +858,13 @@ int sensor_gc5035_cis_set_exposure_time(struct v4l2_subdev *subdev, struct ae_pa
 			cis_data->sen_vsync_count, short_coarse_int);
 	}
 
+	/* Exposure time should be a multiple of 4 */
+	long_coarse_int = MULTIPLE_OF_4(long_coarse_int);
+	if (long_coarse_int > 0x3ffc) {
+		warn("%s: long_coarse_int is above the maximum value : 0x%04x (should be lower than 0x3ffc)\n", __func__, long_coarse_int);
+		long_coarse_int = 0x3ffc;
+	}
+
 	dbg_sensor(2, "[MOD:D:%d] %s, frame_length_lines(%#x), long_coarse_int %#x, short_coarse_int %#x\n",
 		cis->id, __func__, cis_data->frame_length_lines, long_coarse_int, short_coarse_int);
 
@@ -867,7 +884,7 @@ int sensor_gc5035_cis_set_exposure_time(struct v4l2_subdev *subdev, struct ae_pa
 	ret = fimc_is_sensor_addr8_write8(client, 0x03, (long_coarse_int >> 8) & 0x3f);
 	if (ret < 0)
 		goto p_err;
-	ret = fimc_is_sensor_addr8_write8(client, 0x04, (long_coarse_int & 0xff));
+	ret = fimc_is_sensor_addr8_write8(client, 0x04, (long_coarse_int & 0xfc));
 	if (ret < 0)
 		goto p_err;
 
@@ -1094,6 +1111,13 @@ int sensor_gc5035_cis_set_frame_duration(struct v4l2_subdev *subdev, u32 frame_d
 
 	frame_length_lines = (u16)((vt_pic_clk_freq_mhz * frame_duration) / line_length_pck);
 
+	/* Exposure time should be a multiple of 4 */
+	frame_length_lines = MULTIPLE_OF_4(frame_length_lines);
+	if (frame_length_lines > 0x3ffc) {
+		warn("%s: frame_length_lines is above the maximum value : 0x%04x (should be lower than 0x3ffc)\n", __func__, frame_length_lines);
+		frame_length_lines = 0x3ffc;
+	}
+
 	dbg_sensor(2, "[MOD:D:%d] %s, vt_pic_clk_freq_mhz(%#x) frame_duration = %d us,"
 		KERN_CONT "line_length_pck(%#x), frame_length_lines(%#x)\n",
 		cis->id, __func__, vt_pic_clk_freq_mhz, frame_duration, line_length_pck, frame_length_lines);
@@ -1114,7 +1138,7 @@ int sensor_gc5035_cis_set_frame_duration(struct v4l2_subdev *subdev, u32 frame_d
 	if (ret < 0)
 		goto p_err;
 
-	ret = fimc_is_sensor_addr8_write8(client, 0x42, (frame_length_lines & 0xff));
+	ret = fimc_is_sensor_addr8_write8(client, 0x42, (frame_length_lines & 0xfc));
 	if (ret < 0)
 		goto p_err;
 
@@ -2227,34 +2251,39 @@ p_err:
 	return ret;
 }
 
-static int cis_gc5035_remove(struct i2c_client *client)
-{
-	int ret = 0;
-	return ret;
-}
-
-static const struct of_device_id exynos_fimc_is_cis_gc5035_match[] = {
+static const struct of_device_id sensor_cis_gc5035_match[] = {
 	{
 		.compatible = "samsung,exynos5-fimc-is-cis-gc5035",
 	},
 	{},
 };
-MODULE_DEVICE_TABLE(of, exynos_fimc_is_cis_gc5035_match);
+MODULE_DEVICE_TABLE(of, sensor_cis_gc5035_match);
 
-static const struct i2c_device_id cis_gc5035_idt[] = {
+static const struct i2c_device_id sensor_cis_gc5035_idt[] = {
 	{ SENSOR_NAME, 0 },
 	{},
 };
 
-static struct i2c_driver cis_gc5035_driver = {
+static struct i2c_driver sensor_cis_gc5035_driver = {
+	.probe	= cis_gc5035_probe,
 	.driver = {
 		.name	= SENSOR_NAME,
 		.owner	= THIS_MODULE,
-		.of_match_table = exynos_fimc_is_cis_gc5035_match
+		.of_match_table = sensor_cis_gc5035_match,
+		.suppress_bind_attrs = true,
 	},
-	.probe	= cis_gc5035_probe,
-	.remove	= cis_gc5035_remove,
-	.id_table = cis_gc5035_idt
+	.id_table = sensor_cis_gc5035_idt,
 };
 
-module_i2c_driver(cis_gc5035_driver);
+static int __init sensor_cis_gc5035_init(void)
+{
+	int ret;
+
+	ret = i2c_add_driver(&sensor_cis_gc5035_driver);
+	if (ret)
+		err("failed to add %s driver: %d\n",
+			sensor_cis_gc5035_driver.driver.name, ret);
+
+	return ret;
+}
+late_initcall_sync(sensor_cis_gc5035_init);

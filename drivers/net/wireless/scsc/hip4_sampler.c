@@ -50,7 +50,7 @@ static spinlock_t  g_spinlock;
 
 static bool hip4_sampler_enable = true;
 module_param(hip4_sampler_enable, bool, S_IRUGO | S_IWUSR);
-MODULE_PARM_DESC(hip4_sampler_enable, "Enable hip4_sampler_enable. Run-time option - (default: N)");
+MODULE_PARM_DESC(hip4_sampler_enable, "Enable hip4_sampler_enable. Run-time option - (default: Y)");
 
 static bool hip4_sampler_dynamic = true;
 module_param(hip4_sampler_dynamic, bool, S_IRUGO | S_IWUSR);
@@ -360,12 +360,21 @@ static void hip4_sampler_dynamic_switcher(u32 bps)
 	}
 }
 
+static u32 g_tput_rx;
+static u32 g_tput_tx;
+
 void hip4_sampler_tput_monitor(void *client_ctx, u32 state, u32 tput_tx, u32 tput_rx)
 {
 	struct hip4_sampler_dev *hip4_sampler_dev = (struct hip4_sampler_dev *)client_ctx;
 
 	if (!hip4_sampler_enable)
 		return;
+
+	if ((g_tput_tx == tput_tx) && (g_tput_rx == tput_rx))
+		return;
+
+	g_tput_tx = tput_tx;
+	g_tput_rx = tput_rx;
 
 	if (hip4_sampler_dynamic) {
 		/* Call the dynamic switcher with the computed bps
@@ -444,13 +453,7 @@ void hip4_sampler_tcp_decode(struct slsi_dev *sdev, struct net_device *dev, u8 *
 				u32 optlen = 0, len = 0;
 
 				if (tcp_hdr->doff > 5)
-				{
 					optlen = (tcp_hdr->doff - 5) * 4;
-					if (optlen > 60) {
-					SLSI_WARN(sdev, "Error optlen : %u\n", optlen);
-					optlen = 60;
-					}
-				}
 
 				options = (u8 *)tcp_hdr + TCP_ACK_SUPPRESSION_OPTIONS_OFFSET;
 

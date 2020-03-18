@@ -36,7 +36,7 @@ void sm5713_select_pdo(int num)
 	struct sm5713_usbpd_data *psubpd = pd_noti.pusbpd;
 	struct sm5713_phydrv_data *pdic_data = psubpd->phy_driver_data;
 	struct sm5713_usbpd_manager_data *manager = &psubpd->manager;
-	bool vbus_short;
+	bool vbus_short = false;
 
 	if (!pdic_data->is_attached) {
 		pr_info(" %s : PDO(%d) is ignored becasue of plug detached\n", __func__, num);
@@ -46,15 +46,13 @@ void sm5713_select_pdo(int num)
 	psubpd->phy_ops.get_short_state(psubpd, &vbus_short);
 
 	if (vbus_short) {
-		pr_info(" %s : PDO(%d) is ignored becasue of vbus short\n",
-				__func__, pd_noti.sink_status.selected_pdo_num);
+		pr_info(" %s : PDO(%d) is ignored becasue of vbus short\n", __func__, num);
 		return;
 	}
 
-	if (manager->fled_torch_enable || manager->fled_flash_enable) {
+	if (num > 1 && (manager->fled_torch_enable || manager->fled_flash_enable)) {
 		pr_info(" %s : PDO(%d) is ignored becasue of [torch(%d) or flash(%d)]\n",
-				__func__, pd_noti.sink_status.selected_pdo_num,
-				manager->fled_torch_enable, manager->fled_flash_enable);
+			__func__, num, manager->fled_torch_enable, manager->fled_flash_enable);
 		return;
 	}
 
@@ -222,8 +220,8 @@ void sm5713_usbpd_uvdm_close(void)
 		pr_err("%s: manager is null\n", __func__);
 		return;
 	}
-	manager->uvdm_out_busy = 0;
-	manager->uvdm_in_busy = 0;
+	manager->uvdm_out_ok = 1;
+	manager->uvdm_in_ok = 1;
 	wake_up(&manager->uvdm_out_wq);
 	wake_up(&manager->uvdm_in_wq);
 	pr_info("%s\n", __func__);
@@ -277,15 +275,38 @@ int sm5713_usbpd_uvdm_out_request_message(void *data, int size)
 
 	set_msg_header(&manager->uvdm_msg_header, USBPD_Vendor_Defined, 7);
 	set_uvdm_header(&manager->uvdm_data_obj[0], SAMSUNG_VENDOR_ID, 0);
+	set_endian(data, rcv_data, size);
 
 	if (size <= 1) {
 		pr_info("%s - process short data\n", __func__);
 		/* VDM Header + 6 VDOs = MAX 7 */
 		manager->uvdm_msg_header.num_data_objs = 2;
 		manager->uvdm_data_obj[1].sec_uvdm_header.total_set_num = 1;
+		manager->uvdm_data_obj[1].sec_uvdm_header.data = rcv_data[0];
+		manager->uvdm_out_ok = 0;
+		sm5713_usbpd_inform_event(
+			pd_data, MANAGER_UVDM_SEND_MESSAGE);
+		time_left =
+			wait_event_interruptible_timeout(
+				manager->uvdm_out_wq, manager->uvdm_out_ok,
+				msecs_to_jiffies(SEC_UVDM_WAIT_MS));
+		if (manager->uvdm_out_ok == 2)	{
+			pr_err("%s NAK\n", __func__);
+			return -ENODATA;
+		} else if (manager->uvdm_out_ok == 3) {
+			pr_err("%s BUSY\n", __func__);
+			return -EBUSY;
+		} else if (!time_left) {
+			pr_err("%s timeout\n", __func__);
+#ifdef CONFIG_USB_NOTIFY_PROC_LOG
+			event = NOTIFY_EXTRA_UVDM_TIMEOUT;
+			store_usblog_notify(NOTIFY_EXTRA, (void *)&event, NULL);
+#endif
+			return -ETIME;
+		} else if (time_left == -ERESTARTSYS)
+			return -ERESTARTSYS;
 	} else {
 		pr_info("%s - process long data\n", __func__);
-		set_endian(data, rcv_data, size);
 		need_set_cnt = set_uvdmset_count(size);
 		manager->uvdm_first_req = true;
 		manager->uvdm_dir =  DIR_OUT;
@@ -326,14 +347,22 @@ int sm5713_usbpd_uvdm_out_request_message(void *data, int size)
 			}
 
 			set_sec_uvdm_tx_tailer(&manager->uvdm_data_obj[0]);
-			manager->uvdm_out_busy = 1;
+			manager->uvdm_out_ok = 0;
 			sm5713_usbpd_inform_event(
 				pd_data, MANAGER_UVDM_SEND_MESSAGE);
 			time_left =
 				wait_event_interruptible_timeout(
-					manager->uvdm_out_wq, !manager->uvdm_out_busy,
+					manager->uvdm_out_wq, manager->uvdm_out_ok,
 					msecs_to_jiffies(SEC_UVDM_WAIT_MS));
-			if (!time_left) {
+			if (manager->uvdm_out_ok == 2 ||
+				manager->uvdm_out_ok == 4)	{
+				pr_err("%s NAK\n", __func__);
+				return -ENODATA;
+			} else if (manager->uvdm_out_ok == 3 ||
+					   manager->uvdm_out_ok == 5) {
+				pr_err("%s BUSY\n", __func__);
+				return -EBUSY;
+			} else if (!time_left) {
 				pr_err("%s timeout\n", __func__);
 #ifdef CONFIG_USB_NOTIFY_PROC_LOG
 				event = NOTIFY_EXTRA_UVDM_TIMEOUT;
@@ -430,7 +459,7 @@ int sm5713_usbpd_uvdm_in_request_message(void *data)
 				SEC_UVDM_LONG_DATA,
 				SEC_UVDM_ININIATOR, DIR_IN, 0, 0);
 	/* 5. Send data to PDIC */
-	manager->uvdm_in_busy = 1;
+	manager->uvdm_in_ok = 0;
 	sm5713_usbpd_inform_event(pd_data, MANAGER_UVDM_SEND_MESSAGE);
 
 	cur_set_num = 0;
@@ -439,9 +468,15 @@ int sm5713_usbpd_uvdm_in_request_message(void *data)
 	do {
 		time_left =
 			wait_event_interruptible_timeout(
-					manager->uvdm_in_wq, !manager->uvdm_in_busy,
+					manager->uvdm_in_wq, manager->uvdm_in_ok,
 					msecs_to_jiffies(SEC_UVDM_WAIT_MS));
-		if (!time_left) {
+		if (manager->uvdm_in_ok == 2)	{
+			pr_err("%s NAK\n", __func__);
+			return -ENODATA;
+		} else if (manager->uvdm_in_ok == 3) {
+			pr_err("%s BUSY\n", __func__);
+			return -EBUSY;
+		} else if (!time_left) {
 			pr_err("%s timeout\n", __func__);
 #ifdef CONFIG_USB_NOTIFY_PROC_LOG
 			event = NOTIFY_EXTRA_UVDM_TIMEOUT;
@@ -461,6 +496,7 @@ int sm5713_usbpd_uvdm_in_request_message(void *data)
 			SEC_TX_HEADER.object = uvdm_data_obj[2].object;
 
 			if (SEC_RES_HEADER.data_type == TYPE_SHORT) {
+				pr_info("%s - process short data\n", __func__);
 				in_data[rcv_data_size++] = SEC_RES_HEADER.data;
 				return rcv_data_size;
 			}
@@ -502,7 +538,7 @@ int sm5713_usbpd_uvdm_in_request_message(void *data)
 		/* 5.2. Common : Fill the First SEC_VDMHeader*/
 		set_sec_uvdm_rx_header(&manager->uvdm_data_obj[0],
 				cur_set_num, cur_set_data, ack);
-		manager->uvdm_in_busy = 1;
+		manager->uvdm_in_ok = 0;
 		sm5713_usbpd_inform_event(pd_data, MANAGER_UVDM_SEND_MESSAGE);
 	} while (cur_set_num < total_set_num);
 
@@ -527,45 +563,72 @@ static void sm5713_usbpd_receive_samsung_uvdm_message(
 		uvdm_data_obj[i].object = policy->rx_data_obj[i].object;
 
 	uvdm_msg_header.word = policy->rx_msg_header.word;
-	pr_info("%s dir %s\n", __func__,
-		(manager->uvdm_dir == DIR_OUT)?"OUT":"IN");
+	pr_info("%s dir %s\n", __func__, (manager->uvdm_dir == DIR_OUT)
+		? "OUT":"IN");
+
 	if (manager->uvdm_dir == DIR_OUT) {
 		if (manager->uvdm_first_req) {
 			SEC_UVDM_RES_HEADER.object = uvdm_data_obj[1].object;
 			if (SEC_UVDM_RES_HEADER.data_type == TYPE_LONG) {
+				SEC_UVDM_RX_HEADER.object = uvdm_data_obj[2].object;
 				if (SEC_UVDM_RES_HEADER.cmd_type == RES_ACK) {
-					SEC_UVDM_RX_HEADER.object = uvdm_data_obj[2].object;
-					if (SEC_UVDM_RX_HEADER.result_value != RX_ACK)
-						pr_err("%s Busy or Nak received.\n",
-							__func__);
-				} else
-					pr_err("%s Response type is wrong.\n",
-						__func__);
-			} else {
-				if (SEC_UVDM_RES_HEADER.cmd_type == RES_ACK)
-					pr_err("%s Short packet: ack received\n",
-						__func__);
-				else
-					pr_err("%s Short packet: Response type is wrong\n",
-						__func__);
+					if (SEC_UVDM_RX_HEADER.result_value == RX_ACK) {
+						manager->uvdm_out_ok = 1;
+					} else if (SEC_UVDM_RX_HEADER.result_value == RX_NAK) {
+						pr_err("%s SEC_UVDM_RX_HEADER : RX_NAK\n", __func__);
+						manager->uvdm_out_ok = 4;
+					} else if (SEC_UVDM_RX_HEADER.result_value == RX_BUSY) {
+						pr_err("%s SEC_UVDM_RX_HEADER : RX_BUSY\n", __func__);
+						manager->uvdm_out_ok = 5;
+					}
+				} else if (SEC_UVDM_RES_HEADER.cmd_type == RES_NAK) {
+					pr_err("%s SEC_UVDM_RES_HEADER : RES_NAK\n", __func__);
+					manager->uvdm_out_ok = 2;
+				} else if (SEC_UVDM_RES_HEADER.cmd_type == RES_BUSY) {
+					pr_err("%s SEC_UVDM_RES_HEADER : RES_BUSY\n", __func__);
+					manager->uvdm_out_ok = 3;
+				}
+			} else if (SEC_UVDM_RES_HEADER.data_type == TYPE_SHORT) {
+				if (SEC_UVDM_RES_HEADER.cmd_type == RES_ACK) {
+					manager->uvdm_out_ok = 1;
+				} else if (SEC_UVDM_RES_HEADER.cmd_type == RES_NAK) {
+					pr_err("%s SEC_UVDM_RES_HEADER : RES_NAK\n", __func__);
+					manager->uvdm_out_ok = 2;
+				} else if (SEC_UVDM_RES_HEADER.cmd_type == RES_BUSY) {
+					pr_err("%s SEC_UVDM_RES_HEADER : RES_BUSY\n", __func__);
+					manager->uvdm_out_ok = 3;
+				}
 			}
-		/* Dir: out */
 		} else {
 			SEC_UVDM_RX_HEADER.object = uvdm_data_obj[1].object;
-			if (SEC_UVDM_RX_HEADER.result_value != RX_ACK)
-				pr_err("%s Busy or Nak received.\n", __func__);
-		}
-		manager->uvdm_out_busy = 0;
-		wake_up(&manager->uvdm_out_wq);
-	} else {
-		if (manager->uvdm_first_req) {
-			SEC_UVDM_RES_HEADER.object = uvdm_data_obj[1].object;
-			if (SEC_UVDM_RES_HEADER.cmd_type != RES_ACK) {
-				pr_err("%s Busy or Nak received.\n", __func__);
-				return;
+			if (SEC_UVDM_RX_HEADER.result_value == RX_ACK) {
+				manager->uvdm_out_ok = 1;
+			} else if (SEC_UVDM_RX_HEADER.result_value == RX_NAK) {
+				pr_err("%s SEC_UVDM_RX_HEADER : RX_NAK\n", __func__);
+				manager->uvdm_out_ok = 4;
+			} else if (SEC_UVDM_RX_HEADER.result_value == RX_BUSY) {
+				pr_err("%s SEC_UVDM_RX_HEADER : RX_BUSY\n", __func__);
+				manager->uvdm_out_ok = 5;
 			}
 		}
-		manager->uvdm_in_busy = 0;
+		wake_up(&manager->uvdm_out_wq);
+	} else { /* DIR_IN */
+		if (manager->uvdm_first_req) { /* Long = Short */
+			SEC_UVDM_RES_HEADER.object = uvdm_data_obj[1].object;
+			if (SEC_UVDM_RES_HEADER.cmd_type == RES_ACK) {
+				manager->uvdm_in_ok = 1;
+			} else if (SEC_UVDM_RES_HEADER.cmd_type == RES_NAK) {
+				pr_err("%s SEC_UVDM_RES_HEADER : RES_NAK\n", __func__);
+				manager->uvdm_in_ok = 2;
+			} else if (SEC_UVDM_RES_HEADER.cmd_type == RES_BUSY) {
+				pr_err("%s SEC_UVDM_RES_HEADER : RES_BUSY\n", __func__);
+				manager->uvdm_in_ok = 3;
+			}
+		} else {
+			/* IN response case, SEC_TX_HEADER has no ACK message.
+			   So uvdm_is_ok is always 1. */
+			manager->uvdm_in_ok = 1;
+		}
 		wake_up(&manager->uvdm_in_wq);
 	}
 }
@@ -642,8 +705,8 @@ static void sm5713_usbpd_acc_detach_handler(struct work_struct *wk)
 		manager->SVID_1 = 0;
 		manager->Standard_Vendor_ID = 0;
 		manager->is_samsung_accessory_enter_mode = 0;
-		manager->uvdm_out_busy = 0;
-		manager->uvdm_in_busy = 0;
+		manager->uvdm_out_ok = 1;
+		manager->uvdm_in_ok = 1;
 		wake_up(&manager->uvdm_out_wq);
 		wake_up(&manager->uvdm_in_wq);
 	}
@@ -875,6 +938,11 @@ void sm5713_usbpd_turn_on_source(struct sm5713_usbpd_data *pd_data)
 	pr_info("%s\n", __func__);
 
 	sm5713_vbus_turn_on_ctrl(pdic_data, 1);
+
+	sm5713_ccic_event_work(pdic_data,
+		CCIC_NOTIFY_DEV_MUIC, CCIC_NOTIFY_ID_ATTACH,
+		CCIC_NOTIFY_ATTACH/*attach*/,
+		USB_STATUS_NOTIFY_ATTACH_DFP/*rprd*/, 0);
 }
 
 void sm5713_usbpd_turn_off_power_supply(struct sm5713_usbpd_data *pd_data)
@@ -940,12 +1008,38 @@ int sm5713_usbpd_get_svids(struct sm5713_usbpd_data *pd_data)
 {
 	struct sm5713_policy_data *policy = &pd_data->policy;
 	struct sm5713_usbpd_manager_data *manager = &pd_data->manager;
+	struct sm5713_phydrv_data *pdic_data = pd_data->phy_driver_data;
 
 	manager->SVID_0 = policy->rx_data_obj[1].vdm_svid.svid_0;
 	manager->SVID_1 = policy->rx_data_obj[1].vdm_svid.svid_1;
 
 	pr_info("%s, SVID_0 : 0x%x, SVID_1 : 0x%x\n", __func__,
 		manager->SVID_0, manager->SVID_1);
+
+	if (manager->SVID_0 == PD_SID_1 || manager->SVID_1 == PD_SID_1) {
+		manager->dp_is_connect = 1;
+		/* If you want to support USB SuperSpeed when you connect
+		 * Display port dongle, You should change dp_hs_connect depend
+		 * on Pin assignment.If DP use 4lane(Pin Assignment C,E,A),
+		 * dp_hs_connect is 1. USB can support HS.If DP use
+		 * 2lane(Pin Assignment B,D,F), dp_hs_connect is 0. USB
+		 * can support SS
+		 */
+		manager->dp_hs_connect = 1;
+		/* notify to dp event */
+		sm5713_ccic_event_work(pdic_data,
+				CCIC_NOTIFY_DEV_DP,
+				CCIC_NOTIFY_ID_DP_CONNECT,
+				CCIC_NOTIFY_ATTACH,
+				manager->Vendor_ID,
+				manager->Product_ID);
+		/* recheck this notifier */
+		sm5713_ccic_event_work(pdic_data,
+			CCIC_NOTIFY_DEV_USB_DP,
+			CCIC_NOTIFY_ID_USB_DP,
+			manager->dp_is_connect /*attach*/,
+			manager->dp_hs_connect, 0);
+	}
 
 	return 0;
 }
@@ -1052,6 +1146,14 @@ int sm5713_usbpd_evaluate_capability(struct sm5713_usbpd_data *pd_data)
 			dev_err(pd_data->dev, "[%d] Power Type Error\n", i+1);
 			break;
 		}
+	}
+
+	if (pdic_sink_status->rp_currentlvl == RP_CURRENT_ABNORMAL) {
+		available_pdo_num = 1;
+		pdic_sink_status->power_list[1].max_current =
+			pdic_sink_status->power_list[1].max_current > 1800 ?
+			1800 : pdic_sink_status->power_list[1].max_current;
+		dev_info(pd_data->dev, "Fixed max_current to 1.8A because of vbus short\n");
 	}
 
 #ifdef CONFIG_USB_TYPEC_MANAGER_NOTIFIER
@@ -1526,8 +1628,8 @@ static int sm5713_usbpd_manager_init(struct sm5713_usbpd_data *pd_data)
 	manager->fled_flash_enable = 0;
 	manager->fled_torch_enable = 0;
 	manager->origin_available_pdo_num = 0;
-	manager->uvdm_out_busy = 0;
-	manager->uvdm_in_busy = 0;
+	manager->uvdm_out_ok = 1;
+	manager->uvdm_in_ok = 1;
 
 	init_waitqueue_head(&manager->uvdm_out_wq);
 	init_waitqueue_head(&manager->uvdm_in_wq);

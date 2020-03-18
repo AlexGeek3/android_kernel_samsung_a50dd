@@ -750,8 +750,13 @@ void ufshcd_print_trs(struct ufs_hba *hba, unsigned long bitmap, bool pr_prdt)
 		ufshcd_hex_dump("UPIU RSP: ", lrbp->ucd_rsp_ptr,
 				sizeof(struct utp_upiu_rsp));
 
-		prdt_length = le16_to_cpu(
-			lrbp->utr_descriptor_ptr->prd_table_length);
+		if (hba->quirks & UFSHCD_QUIRK_PRDT_BYTE_GRAN)
+			prdt_length = le16_to_cpu(
+					lrbp->utr_descriptor_ptr->prd_table_length)
+				/ sizeof(struct ufshcd_sg_entry);
+		else
+			prdt_length = le16_to_cpu(
+					lrbp->utr_descriptor_ptr->prd_table_length);
 		dev_err(hba->dev,
 			"UPIU[%d] - PRDT - %d entries  phys@0x%llx\n",
 			tag, prdt_length,
@@ -2435,6 +2440,7 @@ static int ufshcd_map_sg(struct ufs_hba *hba, struct ufshcd_lrb *lrbp)
 	int sg_segments;
 	int i, ret;
 	int sector_offset = 0;
+	int page_index = 0;
 
 #if defined(CONFIG_UFS_DATA_LOG)
 	unsigned int dump_index;
@@ -2520,7 +2526,7 @@ static int ufshcd_map_sg(struct ufs_hba *hba, struct ufshcd_lrb *lrbp)
 			prd_table[i].reserved = 0;
 			hba->transferred_sector += prd_table[i].size;
 
-			ret = ufshcd_vops_crypto_engine_cfg(hba, lrbp, sg, i, sector_offset);
+			ret = ufshcd_vops_crypto_engine_cfg(hba, lrbp, sg, i, sector_offset, page_index++);
 			if (ret) {
 				dev_err(hba->dev,
 					"%s: failed to configure crypto engine (%d)\n",
@@ -3130,11 +3136,8 @@ static int ufshcd_exec_dev_cmd(struct ufs_hba *hba,
 	struct completion wait;
 	unsigned long flags;
 
-	if (!ufshcd_is_link_active(hba)) {
-		flush_work(&hba->clk_gating.ungate_work);
-		if (!ufshcd_is_link_active(hba))
-			return -EPERM;
-	}
+	if (!ufshcd_is_link_active(hba))
+		return -EPERM;
 
 	down_read(&hba->clk_scaling_lock);
 
@@ -7555,6 +7558,9 @@ retry:
 	spin_lock_irqsave(hba->host->host_lock, flags);
 	hba->ufshcd_state = UFSHCD_STATE_OPERATIONAL;
 	spin_unlock_irqrestore(hba->host->host_lock, flags);
+
+	hba->saved_err = 0;
+	hba->saved_uic_err = 0;
 
 	/*
 	 * If we are in error handling context or in power management callbacks

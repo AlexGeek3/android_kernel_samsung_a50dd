@@ -161,6 +161,7 @@ void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk)
 {
 	struct stackframe frame;
 	int skip;
+	int cnt = 0;
 
 	pr_debug("%s(regs = %p tsk = %p)\n", __func__, regs, tsk);
 
@@ -190,6 +191,13 @@ void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk)
 		unsigned long stack;
 		int ret;
 
+#ifdef CONFIG_SEC_DEBUG_LIMIT_BACKTRACE
+		if (MAX_UNWINDING_LOOP < cnt) {
+			pr_info("%s: Forcely break dump_backtrace to avoid infinity backtrace\n", __func__);
+			break;
+		}
+#endif
+
 		/* skip until specified stack frame */
 		if (!skip) {
 			dump_backtrace_entry(frame.pc);
@@ -216,6 +224,7 @@ void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk)
 				dump_mem("", "Exception stack", stack,
 					 stack + sizeof(struct pt_regs));
 		}
+		cnt++;
 	}
 
 	put_task_stack(tsk);
@@ -226,6 +235,7 @@ static void dump_backtrace_auto_summary(struct pt_regs *regs, struct task_struct
 {
 	struct stackframe frame;
 	int skip;
+	int cnt = 0;
 
 	pr_debug("%s(regs = %p tsk = %p)\n", __func__, regs, tsk);
 
@@ -256,6 +266,13 @@ static void dump_backtrace_auto_summary(struct pt_regs *regs, struct task_struct
 		unsigned long stack;
 		int ret;
 
+#ifdef CONFIG_SEC_DEBUG_LIMIT_BACKTRACE
+		if (MAX_UNWINDING_LOOP < cnt) {
+			pr_info("%s: Forcely break dump_backtrace to avoid infinity backtrace\n", __func__);
+			break;
+		}
+#endif
+
 		/* skip until specified stack frame */
 		if (!skip) {
 			dump_backtrace_entry_auto_summary(frame.pc);
@@ -280,6 +297,7 @@ static void dump_backtrace_auto_summary(struct pt_regs *regs, struct task_struct
 				dump_mem("", "Exception stack", stack,
 					 stack + sizeof(struct pt_regs));
 		}
+		cnt++;
 	}
 
 	put_task_stack(tsk);
@@ -359,8 +377,12 @@ void die(const char *str, struct pt_regs *regs, int err)
 	oops_exit();
 
 #ifdef CONFIG_SEC_DEBUG_EXTRA_INFO
-	sec_debug_set_extra_info_backtrace(regs);
+	if (regs) {
+		if (!user_mode(regs))
+			sec_debug_set_extra_info_backtrace(regs);
+	}
 #endif
+
 #if defined(CONFIG_SEC_DEBUG)
 	if (in_interrupt()) {
 		if (regs)

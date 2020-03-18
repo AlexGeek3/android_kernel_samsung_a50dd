@@ -71,6 +71,7 @@ enum {
 
 struct sm5713_charger_platform_data {
 	int chg_float_voltage;
+	unsigned int chg_ocp_current;
 };
 
 #define REDUCE_CURRENT_STEP						100

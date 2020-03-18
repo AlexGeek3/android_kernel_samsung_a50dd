@@ -28,6 +28,9 @@ struct fwhdr {
 	u32 hdr_length;
 	u32 r4_panic_record_offset;
 	u32 m4_panic_record_offset;
+#ifdef CONFIG_SCSC_MX450_GDB_SUPPORT
+	u32 m4_1_panic_record_offset;
+#endif
 };
 
 bool fwhdr_parse(char *fw, struct fwhdr *fwhdr);

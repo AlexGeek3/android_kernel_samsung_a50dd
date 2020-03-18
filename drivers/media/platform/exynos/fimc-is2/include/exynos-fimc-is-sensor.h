@@ -108,7 +108,7 @@ enum exynos_sensor_id {
 	SENSOR_NAME_SAK2L3		 = 36,
 	SENSOR_NAME_SAK2L4		 = 37,
 	SENSOR_NAME_S5K3J1		 = 38,
-	SENSOR_NAME_S5K4HA       = 39,
+	SENSOR_NAME_S5K4HA		 = 39,
 	SENSOR_NAME_S5K3P9		 = 40,
 	SENSOR_NAME_S5K5E9		 = 41,
 	SENSOR_NAME_S5K3P8SP		 = 44,
@@ -116,10 +116,13 @@ enum exynos_sensor_id {
 	SENSOR_NAME_S5KRPB		 = 46,
 	SENSOR_NAME_S5K2P7SQ		 = 47,
 	SENSOR_NAME_S5K2T7SX		 = 48,
+	SENSOR_NAME_S5K2PAS		 = 49,
+	SENSOR_NAME_S5K3M5		 = 50,
 	SENSOR_NAME_S5K4EC		 = 57,
 	SENSOR_NAME_S5K2P6		 = 58,
 	SENSOR_NAME_S5K3L6		 = 59,
 	SENSOR_NAME_S5K2X5		 = 60,
+	SENSOR_NAME_S5KGM2		 = 61,
 
 	/* 101~200: SONY sensors */
 	SENSOR_NAME_IMX135		 = 101,
@@ -137,6 +140,11 @@ enum exynos_sensor_id {
 	SENSOR_NAME_IMX241		 = 113,
 	SENSOR_NAME_IMX345		 = 114,
 	SENSOR_NAME_IMX576		 = 115,
+	SENSOR_NAME_IMX316		 = 116,
+	SENSOR_NAME_IMX586		 = 117,
+	SENSOR_NAME_IMX471		 = 118,
+	SENSOR_NAME_IMX582		 = 120,
+	SENSOR_NAME_IMX616		 = 121,
 
 	/* 201~255: Other vendor sensors */
 	SENSOR_NAME_SR261		 = 201,
@@ -149,6 +157,8 @@ enum exynos_sensor_id {
 	SENSOR_NAME_SR846		 = 208,
 	SENSOR_NAME_SR556		 = 209,
 	SENSOR_NAME_GC5035		 = 210,
+	SENSOR_NAME_HI1336		 = 211,
+	SENSOR_NAME_HI1631		 = 213,
 
 	/* 256~: currently not used */
 	SENSOR_NAME_CUSTOM		 = 301,
@@ -186,24 +196,27 @@ enum actuator_name {
 	ACTUATOR_NAME_ZC535   = 20,
 	ACTUATOR_NAME_ZC569	= 21,
 	ACTUATOR_NAME_DW9823  = 22,
+
 	ACTUATOR_NAME_END,
 	ACTUATOR_NAME_NOTHING	= 100,
 };
 
 enum flash_drv_name {
-	FLADRV_NAME_KTD267	= 1,	/* Gpio type(Flash mode, Movie/torch mode) */
+	FLADRV_NAME_KTD267		= 1,	/* Gpio type(Flash mode, Movie/torch mode) */
 	FLADRV_NAME_AAT1290A	= 2,
 	FLADRV_NAME_MAX77693	= 3,
-	FLADRV_NAME_AS3643	= 4,
+	FLADRV_NAME_AS3643		= 4,
 	FLADRV_NAME_KTD2692	= 5,
-	FLADRV_NAME_LM3560	= 6,
+	FLADRV_NAME_LM3560		= 6,
 	FLADRV_NAME_SKY81296	= 7,
-	FLADRV_NAME_RT5033	= 8,
-	FLADRV_NAME_AS3647	= 9,
-	FLADRV_NAME_LM3646	= 10,
-	FLADRV_NAME_DRV_FLASH_GPIO = 11, /* Common Gpio type(Flash mode, Movie/torch mode) */
-	FLADRV_NAME_LM3644	= 12,
-	FLADRV_NAME_DRV_FLASH_I2C = 13, /* Common I2C type */
+	FLADRV_NAME_RT5033		= 8,
+	FLADRV_NAME_AS3647		= 9,
+	FLADRV_NAME_LM3646		= 10,
+	FLADRV_NAME_DRV_FLASH_GPIO	= 11, /* Common Gpio type(Flash mode, Movie/torch mode) */
+	FLADRV_NAME_LM3644		= 12,
+	FLADRV_NAME_DRV_FLASH_I2C	= 13, /* Common I2C type */
+	FLADRV_NAME_RT8547		= 16,
+
 	FLADRV_NAME_END,
 	FLADRV_NAME_NOTHING	= 100,
 };
@@ -352,6 +365,8 @@ struct exynos_platform_fimc_is_sensor {
 	unsigned long internal_state;
 	u32 csi_mux;
 	u32 multi_ch;
+	u32 camif_mux_val;
+	u32 camif_mux_val_s;
 };
 
 int exynos_fimc_is_sensor_iclk_cfg(struct device *dev,

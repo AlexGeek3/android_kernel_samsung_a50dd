@@ -195,6 +195,11 @@ int muic_check_fled_state(bool enable, u8 mode)
 
 	if ((muic_data->fled_torch_enable == false) &&
 			(muic_data->fled_flash_enable == false)) {
+		if (muic_data->hv_voltage == 5) {
+			pr_info("[%s:%s] skip high voltage setting\n",
+					MUIC_DEV_NAME, __func__);
+			return 0;
+		}
 		if ((mode == FLED_MODE_TORCH) && (enable == false)) {
 			cancel_delayed_work(&muic_data->afc_torch_work);
 			schedule_delayed_work(&muic_data->afc_torch_work,
@@ -896,8 +901,9 @@ int sm5713_afc_error(struct sm5713_muic_data *muic_data)
 	pr_info("[%s:%s] REG_AFCSTATUS [0x%02x]\n", MUIC_DEV_NAME, __func__,
 			value);
 
+	dev1 = sm5713_i2c_read_byte(i2c, SM5713_MUIC_REG_DEVICETYPE1);
+
 	if (muic_data->afc_retry_count < 5) {
-		dev1 = sm5713_i2c_read_byte(i2c, SM5713_MUIC_REG_DEVICETYPE1);
 		pr_info("[%s:%s] DEVICE_TYPE1 [0x%02x]\n",
 				MUIC_DEV_NAME, __func__, dev1);
 		if ((dev1 & DEV_TYPE1_QC20_TA) &&
@@ -1073,6 +1079,7 @@ int sm5713_muic_afc_set_voltage(int vol)
 	}
 
 	pr_info("[%s:%s] vol = %dV\n", MUIC_DEV_NAME, __func__, vol);
+	muic_data->hv_voltage = vol;
 
 	if (vol == 5) {
 		hv_muic_change_afc_voltage(SM5713_MUIC_HV_5V);

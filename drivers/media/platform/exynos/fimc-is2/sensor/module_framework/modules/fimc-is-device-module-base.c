@@ -793,6 +793,8 @@ int sensor_module_s_ext_ctrls(struct v4l2_subdev *subdev, struct v4l2_ext_contro
 #ifdef CONFIG_VENDER_MCD_V2
 	char *dual_cal = NULL;
 	int cal_size = 0; 
+	char *remosaic_cal = NULL;
+	int remosaic_cal_size = 0; 
 #endif
 
 	FIMC_BUG(!subdev);
@@ -845,6 +847,29 @@ int sensor_module_s_ext_ctrls(struct v4l2_subdev *subdev, struct v4l2_ext_contro
 			}
 #else
 			err("Available version is not defined. Not apply dual cal.");
+			ret = -EINVAL;
+			goto p_err;
+#endif
+			break;
+
+		case V4L2_CID_IS_GET_REMOSAIC_CAL:
+#ifdef CONFIG_VENDER_MCD_V2
+			ret = fimc_is_get_remosaic_cal_buf(device->position, &remosaic_cal, &remosaic_cal_size);
+			if (ret == 0) {
+				info("remosaic cal[%d] : size(%d)", device->position, remosaic_cal_size);
+				ret = copy_to_user(ext_ctrl->ptr, remosaic_cal, remosaic_cal_size);
+				if (ret) {
+					err("failed copying %d bytes of data\n", ret);
+					ret = -EINVAL;
+					goto p_err;
+				}
+			} else {
+				err("failed to fimc_is_get_remosaic_cal_buf : %d\n", ret);
+				ret = -EINVAL;
+				goto p_err;
+			}
+#else
+			err("Available version is not defined. Not apply remosaic cal.");
 			ret = -EINVAL;
 			goto p_err;
 #endif

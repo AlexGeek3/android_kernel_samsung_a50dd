@@ -29,6 +29,9 @@
 #include <linux/mutex.h>
 #include <linux/debug-snapshot.h>
 #include <linux/debugfs.h>
+#ifdef CONFIG_SEC_PM_DEBUG
+#include <linux/sec_pm_debug.h>
+#endif
 
 static struct s2mpu09_info *static_info;
 static struct regulator_desc regulators[S2MPU09_REGULATOR_MAX];
@@ -647,6 +650,18 @@ static int s2mpu09_pmic_probe(struct platform_device *pdev)
 	static_info = s2mpu09;
 
 	platform_set_drvdata(pdev, s2mpu09);
+
+#ifdef CONFIG_SEC_PM_DEBUG
+	ret = s2mpu09_read_reg(s2mpu09->i2c, S2MPU09_PMIC_REG_PWRONSRC,
+			&pmic_onsrc);
+	if (ret)
+		dev_err(&pdev->dev, "failed to read PWRONSRC\n");
+
+	ret = s2mpu09_read_reg(s2mpu09->i2c, S2MPU09_PMIC_REG_OFFSRC,
+			&pmic_offsrc);
+	if (ret)
+		dev_err(&pdev->dev, "failed to read OFFSRC\n");
+#endif
 
 	for (i = 0; i < pdata->num_regulators; i++) {
 		int id = pdata->regulators[i].id;

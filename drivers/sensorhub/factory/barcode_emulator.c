@@ -2,7 +2,7 @@
 #include "../ssp_comm.h"
 #include "../ssp_cmd_define.h"
 #include "ssp_factory.h"
-#include <linux/sec_sysfs.h>
+#include <linux/sec_class.h>
 
 #define VENDOR          "STM"
 #define CHIP_ID         "STM32F410TBY6TR"

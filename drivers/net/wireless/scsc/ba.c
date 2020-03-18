@@ -180,6 +180,9 @@ static int ba_consume_frame_or_get_buffer_index(struct net_device *dev, struct s
 {
 	int i;
 	u16 sn_temp;
+#ifdef CONFIG_SCSC_WLAN_STA_ENHANCED_ARP_DETECT
+	struct netdev_vif *ndev_vif = netdev_priv(dev);
+#endif
 
 	*stop_timer = false;
 
@@ -247,6 +250,11 @@ static int ba_consume_frame_or_get_buffer_index(struct net_device *dev, struct s
 					ba_add_frame_to_ba_complete(dev, frame_desc);
 				} else {
 					SLSI_NET_DBG1(dev, SLSI_RX_BA, "old frame, drop: sn=%d, expected_sn=%d\n", sn, ba_session_rx->expected_sn);
+#ifdef CONFIG_SCSC_WLAN_STA_ENHANCED_ARP_DETECT
+					if (ndev_vif->enhanced_arp_detect_enabled)
+						slsi_fill_enhanced_arp_out_of_order_drop_counter(ndev_vif,
+												 frame_desc->signal);
+#endif
 					slsi_kfree_skb(frame_desc->signal);
 				}
 			}
@@ -255,9 +263,17 @@ static int ba_consume_frame_or_get_buffer_index(struct net_device *dev, struct s
 	return i;
 }
 
+#if KERNEL_VERSION(4, 15, 0) <= LINUX_VERSION_CODE
+static void slsi_ba_aging_timeout_handler(struct timer_list *t)
+#else
 static void slsi_ba_aging_timeout_handler(unsigned long data)
+#endif
 {
+#if KERNEL_VERSION(4, 15, 0) <= LINUX_VERSION_CODE
+	struct slsi_ba_session_rx *ba_session_rx = from_timer(ba_session_rx, t, ba_age_timer);
+#else
 	struct slsi_ba_session_rx *ba_session_rx = (struct slsi_ba_session_rx *)data;
+#endif
 	u8                        i, j;
 	u8                        gap = 1;
 	u16                       temp_sn;
@@ -512,9 +528,13 @@ static int slsi_rx_ba_start(struct net_device *dev,
 	ba_session_rx->trigger_ba_after_ssn = false;
 	ba_session_rx->tid = tid;
 	ba_session_rx->timer_on = false;
+#if KERNEL_VERSION(4, 15, 0) <= LINUX_VERSION_CODE
+	timer_setup(&ba_session_rx->ba_age_timer, slsi_ba_aging_timeout_handler, 0);
+#else
 	ba_session_rx->ba_age_timer.function = slsi_ba_aging_timeout_handler;
 	ba_session_rx->ba_age_timer.data = (unsigned long)ba_session_rx;
 	init_timer(&ba_session_rx->ba_age_timer);
+#endif
 
 	ba_session_rx->active = true;
 	SLSI_NET_DBG1(dev, SLSI_RX_BA, "Started a new BA session tid=%d buffer_size=%d start_sn=%d\n",

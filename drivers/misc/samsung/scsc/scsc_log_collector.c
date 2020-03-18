@@ -124,8 +124,8 @@ static void collection_worker(struct work_struct *work)
 	struct scsc_log_status *ls;
 
 	ls = container_of(work, struct scsc_log_status, collect_work);
-	if (!ls)
-		return;
+	/* ls cannot be NULL due to pointer arithmetic */
+
 	pr_info("SCSC running scheduled Log Collection - collect reason:%d reason code:%d\n",
 		 ls->collect_reason, ls->reason_code);
 	scsc_log_collector_collect(ls->collect_reason, ls->reason_code);
@@ -504,13 +504,13 @@ void scsc_log_collector_schedule_collection(enum scsc_log_reason reason, u16 rea
 		}
 		atomic_set(&in_collection, 1);
 		pr_info("Log collection Scheduled");
-		
+
 		/* If dumping a FW panic (i.e. collecting a moredump), we need
 		 * to wait for the collection to finish before returning.
 		 */
-		if (reason == SCSC_LOG_FW_PANIC){
+		if (reason == SCSC_LOG_FW_PANIC)
 			flush_work(&log_status.collect_work);
-		}
+
 		mutex_unlock(&log_status.collection_serial);
 
 	} else {

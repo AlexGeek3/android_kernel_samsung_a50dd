@@ -164,6 +164,8 @@ static const struct tfa9xxx_rate rate_to_fssel[] = {
 #endif
 };
 
+extern void exynos9610_set_xclkout0_13(void);
+
 static inline char *tfa_cnt_profile_name(struct tfa9xxx *tfa9xxx, int prof_idx)
 {
 	if (!tfa9xxx->tfa->cnt)
@@ -1729,12 +1731,15 @@ static int tfa9xxx_dsp_init(struct tfa9xxx *tfa9xxx)
 #else
 		if (tfa9xxx->mclk) {
 			ret = clk_prepare_enable(tfa9xxx->mclk);
+			exynos9610_set_xclkout0_13();
 			if (ret < 0) {
 				dev_warn(&tfa9xxx->i2c->dev,
 					"%s: failed in enabling mclk\n",
 					__func__);
 				return ret;
-			}
+			} else
+				dev_dbg(&tfa9xxx->i2c->dev,
+					"%s: Success enable mclk\n", __func__);
 #endif
 			msleep(MCLK_START_DELAY);
 		}
@@ -2676,9 +2681,9 @@ static int tfa9xxx_i2c_probe(struct i2c_client *i2c,
 #if defined(TFA_USE_GPIO_FOR_MCLK)
 	/* skip setting clock, assuming synchronous setting with cnt */
 	if (gpio_is_valid(tfa9xxx->mclk_gpio)) {
-		dev_info(&i2c->dev, "using mclk\n");
+		dev_info(&i2c->dev, "using mclk_gpio\n");
 #if !defined(TFA_CONTROL_MCLK)
-		dev_info(&i2c->dev, "set mclk active\n");
+		dev_info(&i2c->dev, "set mclk_gpio active\n");
 		gpio_set_value_cansleep(tfa9xxx->mclk_gpio, 1);
 #endif
 	}
@@ -2691,15 +2696,18 @@ static int tfa9xxx_i2c_probe(struct i2c_client *i2c,
 
 	if (tfa9xxx->mclk) {
 		dev_info(&i2c->dev, "using mclk\n");
+/*
 		ret = clk_set_rate(tfa9xxx->mclk, FIXED_MCLK_RATE);
 		if (ret < 0) {
 			dev_warn(&i2c->dev, "failed in setting rate to mclk\n");
 			tfa9xxx->mclk = NULL;
 		}
-#if !defined(TFA_CONTROL_MCLK)
+*/
+#if defined(TFA_CONTROL_MCLK)
 		dev_info(&i2c->dev, "set mclk active\n");
 		if (tfa9xxx->mclk) {
 			ret = clk_prepare_enable(tfa9xxx->mclk);
+			exynos9610_set_xclkout0_13();
 			if (ret < 0)
 				dev_warn(&i2c->dev, "failed in enabling mclk\n");
 		}

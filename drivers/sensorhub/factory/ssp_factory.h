@@ -91,8 +91,6 @@ struct gyroscope_sensor_operations {
 	ssize_t (*get_gyro_power_on)(char *);
 	ssize_t (*get_gyro_temperature)(struct ssp_data *, char *);
 	ssize_t (*get_gyro_selftest)(struct ssp_data *, char *);
-	ssize_t (*get_gyro_selftest_dps)(struct ssp_data *, char *);
-	ssize_t (*set_gyro_selftest_dps)(struct ssp_data *, const char *);
 };
 
 #if defined(CONFIG_SENSORS_SSP_GYROSCOPE_LSM6DSL)
@@ -130,6 +128,8 @@ struct magnetic_sensor_operations {
 
 #if defined(CONFIG_SENSORS_SSP_MAGNETIC_AK09918C)
 struct magnetic_sensor_operations* get_magnetic_ak09918c_function_pointer(struct ssp_data *);
+#elif defined(CONFIG_SENSORS_SSP_MAGNETIC_MMC5603)
+struct magnetic_sensor_operations* get_magnetic_mmc5603_function_pointer(struct ssp_data *);
 #elif defined(CONFIG_SENSORS_SSP_MAGNETIC_AK09916C)
 struct magnetic_sensor_operations* get_magnetic_ak09916c_function_pointer(struct ssp_data *);
 #else //if defined(CONFIG_SENSORS_SSP_MAGNETIC_LSM303AH)
@@ -160,16 +160,25 @@ struct proximity_sensor_operations {
 
 	ssize_t (*get_proximity_setting)(char *);
 	ssize_t (*set_proximity_setting)(struct ssp_data *, const char *);
-	
+
 	ssize_t (*get_proximity_trim_check)(struct ssp_data *, char *);	
+	
+	ssize_t (*set_proximity_calibration)(struct ssp_data *, const char *);
+	ssize_t (*get_proximity_calibration_result)(char *);
 };
 
 void initialize_prox_factorytest(struct ssp_data *);
 void remove_prox_factorytest(struct ssp_data *);
 void select_prox_ops(struct ssp_data *data);
 
+#ifdef CONFIG_SENSOR_SSP_PROXIMITY_GP2AP110S
+int gp2ap110s_read_setting(struct ssp_data *data);
+#endif
+
 #if defined(CONFIG_SENSORS_SSP_PROXIMITY_AUTO_CAL_TMD3725)
 struct proximity_sensor_operations* get_proximity_ams_auto_cal_function_pointer(struct ssp_data *);
+#elif defined(CONFIG_SENSORS_SSP_PROXIMITY_GP2AP110S)
+struct proximity_sensor_operations* get_proximity_gp2ap110s_function_pointer(struct ssp_data *);
 #else
 struct proximity_sensor_operations* get_proximity_stk3x3x_function_pointer(struct ssp_data *);
 #endif
@@ -194,6 +203,8 @@ void select_light_ops(struct ssp_data *data);
 struct light_sensor_operations* get_light_tmd3700_function_pointer(struct ssp_data *);
 #elif defined(CONFIG_SENSORS_SSP_LIGHT_TMD3725)
 struct light_sensor_operations* get_light_tmd3725_function_pointer(struct ssp_data *);
+#elif defined(CONFIG_SENSORS_SSP_LIGHT_VEML3328)
+struct light_sensor_operations* get_light_veml3328_function_pointer(struct ssp_data *);
 #else //if defined(CONFIG_SENSORS_SSP_LIGHT_TCS3701)
 struct light_sensor_operations* get_light_tcs3701_function_pointer(struct ssp_data *);
 #endif

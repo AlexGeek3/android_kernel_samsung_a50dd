@@ -144,6 +144,7 @@ struct exynos_tmu_data {
 	char tmu_name[THERMAL_NAME_LENGTH + 1];
 	struct device_node *np;
 	int balance_offset;
+	struct mutex hotplug_lock;
 
 	int (*tmu_initialize)(struct platform_device *pdev);
 	void (*tmu_control)(struct platform_device *pdev, bool on);

@@ -1242,9 +1242,20 @@ irqreturn_t mfc_top_half_irq(int irq, void *priv)
 
 	reason = mfc_get_int_reason();
 	err = mfc_get_int_err();
+
+	dev->last_int = reason;
+	dev->last_int_time = ktime_to_timeval(ktime_get());
+
+	if ((reason == MFC_REG_R2H_CMD_SEQ_DONE_RET) ||
+			(reason == MFC_REG_R2H_CMD_INIT_BUFFERS_RET) ||
+			(reason == MFC_REG_R2H_CMD_FRAME_DONE_RET) ||
+			(reason == MFC_REG_R2H_CMD_QUEUE_DONE_RET))
+		ctx->frame_cnt++;
+
 	mfc_debug(2, "[c:%d] Int reason: %d (err: %d)\n",
 			dev->curr_ctx, reason, err);
 	MFC_TRACE_CTX("<< INT(top): %d\n", reason);
+	MFC_TRACE_LOG_CTX("I%d", reason);
 
 	mfc_perf_measure_off(dev);
 
@@ -1552,14 +1563,12 @@ irqreturn_t mfc_irq(int irq, void *priv)
 	/* clean-up interrupt */
 	mfc_clear_int();
 
-	if ((ctx->state != MFCINST_RES_CHANGE_INIT) && (mfc_ctx_ready(ctx) == 0))
-		mfc_clear_bit(ctx->num, &dev->work_bits);
+	if (ctx->state != MFCINST_RES_CHANGE_INIT)
+		mfc_ctx_ready_clear_bit(ctx, &dev->work_bits);
 
 	if (ctx->otf_handle) {
-		if (mfc_otf_ctx_ready(ctx))
-			mfc_set_bit(ctx->num, &dev->work_bits);
-		else
-			mfc_clear_bit(ctx->num, &dev->work_bits);
+		if (mfc_otf_ctx_ready_set_bit(ctx, &dev->work_bits) == 0)
+			mfc_otf_ctx_ready_clear_bit(ctx, &dev->work_bits);
 	}
 
 	mfc_hwlock_handler_irq(dev, ctx, reason, err);

@@ -13,9 +13,11 @@
 #if defined(TFA_USE_GPIO_FOR_MCLK)
 #include <linux/gpio.h>
 #endif
+#include <linux/module.h>
 
 #define TFA_HAP_MAX_TIMEOUT (0x7fffff)
 #define DEFAULT_PLL_OFF_DELAY 100 /* msec */
+#define TIMEOUT 10000
 
 static const char *haptic_feature_id_str[]
 	= {"wave", "sine", "silence", "illegal"};
@@ -30,7 +32,7 @@ static const char *haptic_feature_id(int id)
 
 static void haptic_dump_obj(struct seq_file *f, struct haptic_tone_object *o)
 {
-	switch(o->type) {
+	switch (o->type) {
 	case OBJECT_WAVE:
 		seq_printf(f, "\t type: %s\n"
 			"\t offset: %d\n"
@@ -39,9 +41,11 @@ static void haptic_dump_obj(struct seq_file *f, struct haptic_tone_object *o)
 			"\t up_samp_sel: %d\n",
 			haptic_feature_id(o->type),
 			o->freq,
-			(100 * o->level) / 0x7fffff, /* Q1.23, percentage of max */
+			/* Q1.23, percentage of max */
+			(100 * o->level) / 0x7fffff,
 			o->duration_cnt_max,
-			o->duration_cnt_max / 48, /* sapmples in time : 1/FS ms */
+			/* samples in time : 1/FS ms */
+			o->duration_cnt_max / 48,
 			o->boost_brake_on);
 		break;
 	case OBJECT_TONE:
@@ -54,20 +58,23 @@ static void haptic_dump_obj(struct seq_file *f, struct haptic_tone_object *o)
 			"\t boost_length: %d\n",
 			haptic_feature_id(o->type),
 			o->freq >> 11, /* Q13.11 */
-			(100 * o->level) / 0x7fffff, /* Q1.23, percentage of max */
-			o->duration_cnt_max / 48, /* sapmples in time : 1/FS ms */
+			/* Q1.23, percentage of max */
+			(100 * o->level) / 0x7fffff,
+			/* samples in time : 1/FS ms */
+			o->duration_cnt_max / 48,
 			o->boost_brake_on,
 			o->tracker_on,
 			o->boost_length);
 		break;
 	case OBJECT_SILENCE:
+		/* samples in time : 1/FS ms */
 		seq_printf(f, "\t type: %s\n"
 			"\t duration_cnt_max: %dms\n",
 			haptic_feature_id(o->type),
-			o->duration_cnt_max / 48); /* sapmples in time : 1/FS ms */
+			o->duration_cnt_max / 48);
 		break;
 	default:
-		seq_printf(f, "wrong feature id in object!\n");
+		seq_puts(f, "wrong feature id in object!\n");
 		break;
 	}
 }
@@ -142,6 +149,13 @@ static void tfa_haptic_pll_off(struct work_struct *work)
 	/* turn off PLL */
 	tfa2_dev_stop(drv->tfa);
 
+	if (drv->clk_users > 0) {
+		dev_dbg(&drv->i2c->dev,
+			"%s: skip disabling mclk - clk_users %d\n",
+			__func__, drv->clk_users);
+		return;
+	}
+
 #if defined(TFA_CONTROL_MCLK)
 	dev_dbg(&drv->i2c->dev,
 		"%s: disable mclk\n", __func__);
@@ -164,7 +178,7 @@ static void tfa9xxx_haptic_clock(struct tfa9xxx *drv, bool on)
 #endif
 
 	dev_dbg(&drv->i2c->dev, "%s: on=%d, clk_users=%d\n",
-		__func__,(int)on, drv->clk_users);
+		__func__, (int)on, drv->clk_users);
 
 	/* cancel delayed turning off of the PLL */
 	if (delayed_work_pending(&drv->pll_off_work))
@@ -247,7 +261,7 @@ static void tfa9xxx_update_led_class(struct work_struct *work)
 
 	data = &drv->tfa->hap_data;
 
-	dev_info(&drv->i2c->dev, "%s: type: %d, index: %d, state: %d\n",
+	dev_info(&drv->i2c->dev, "[VIB] %s: type: %d, index: %d, state: %d\n",
 		__func__, (int)obj->type, obj->index, obj->state);
 
 	if (obj->state != STATE_STOP) {
@@ -257,7 +271,7 @@ static void tfa9xxx_update_led_class(struct work_struct *work)
 			tfa9xxx_haptic_clock(drv, true);
 
 		if (tfa2_haptic_start(drv->tfa, data, obj->index)) {
-			dev_err(&drv->i2c->dev, "%s: problem when starting\n",
+			dev_err(&drv->i2c->dev, "[VIB] %s: problem when starting\n",
 				__func__);
 		}
 	} else {
@@ -321,7 +335,7 @@ static ssize_t tfa9xxx_show_value(struct device *dev,
 
 	size = snprintf(buf, 80,
 		"index=%d, amplitude=%d, frequency=%d, duration=%d\n",
-		tfa->hap_data.index, tfa->hap_data.amplitude, 
+		tfa->hap_data.index, tfa->hap_data.amplitude,
 		tfa->hap_data.frequency, tfa->hap_data.duration);
 
 	return size;
@@ -350,14 +364,27 @@ static ssize_t tfa9xxx_show_state(struct device *dev,
 	return size;
 }
 
-static ssize_t tfa9xxx_store_activate(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t count)
+static int tfa9xxx_get_time(struct timed_output_dev *dev)
 {
-	struct led_classdev *cdev = dev_get_drvdata(dev);
-	struct tfa9xxx *drv = container_of(cdev, struct tfa9xxx, led_dev);
+	//struct tfa9xxx *drv = dev_get_drvdata(dev);
+	struct tfa9xxx *drv = container_of(dev, struct tfa9xxx, motor_dev);
+	struct hrtimer *timer = &drv->tone_object.active_timer;
+
+	if (hrtimer_active(timer)) {
+		ktime_t remain = hrtimer_get_remaining(timer);
+		struct timeval t = ktime_to_timeval(remain);
+
+		return t.tv_sec * 1000 + t.tv_usec / 1000;
+	} else
+		return 0;
+}
+
+static void tfa9xxx_enable(struct timed_output_dev *dev, int value)
+{
+	struct tfa9xxx *drv = container_of(dev, struct tfa9xxx, motor_dev);
 	struct tfa2_device *tfa = drv->tfa;
-	struct drv_object *obj= &drv->tone_object;
-	u32 val;
+	struct drv_object *obj = &drv->tone_object;
+	u32 val = value;
 	int rc;
 	int state;
 #if defined(PARALLEL_OBJECTS)
@@ -366,16 +393,12 @@ static ssize_t tfa9xxx_store_activate(struct device *dev,
 
 	if (!drv->patch_loaded) {
 		dev_err(&drv->i2c->dev, "%s: patch not loaded\n", __func__);
-		return -EINVAL;
+		return;
 	}
-
-	rc = kstrtouint(buf, 0, &val);
-	if (rc < 0)
-		return rc;
 
 	state = (val != 0);
 
-	dev_dbg(&drv->i2c->dev, "%s: update_object_index=%d, val=%d\n",
+	dev_dbg(&drv->i2c->dev, "[VIB] %s: update_object_index=%d, val=%d\n",
 		__func__, (int)drv->update_object_index, val);
 
 #if defined(PARALLEL_OBJECTS)
@@ -390,36 +413,12 @@ static ssize_t tfa9xxx_store_activate(struct device *dev,
 	if (drv->update_object_index == true) {
 		drv->update_object_index = false;
 		obj->index = drv->object_index;
-		return count;
+		return;
 	}
-
-	/* when no bck and no mclk, we can not play vibrations */
-#if (defined(TFA_CONTROL_MCLK) && defined(TFA_USE_GPIO_FOR_MCLK))
-	if (!drv->bck_running) {
-		if (!gpio_is_valid(drv->mclk_gpio)) {
-			dev_warn(&drv->i2c->dev, "%s: no active clock\n", __func__);
-			return -ENODEV;
-		} else {
-			if (gpio_get_value_cansleep(drv->mclk_gpio) == 0) {
-				dev_warn(&drv->i2c->dev, "%s: no active clock\n", __func__);
-				return -ENODEV;
-			} else {
-				dev_dbg(&drv->i2c->dev, "%s: mclk is active\n", __func__);
-			}
-		}
-	} else {
-		dev_dbg(&drv->i2c->dev, "%s: bck is active\n", __func__);
-	}
-#else
-	if (!drv->bck_running && !drv->mclk) {
-		dev_warn(&drv->i2c->dev, "%s: no active clock\n", __func__);
-		return -ENODEV;
-	}
-#endif
 
 	if (state == 0) {
 		if (obj->state == STATE_STOP)
-			return count;
+			return;
 		obj->state = STATE_STOP;
 	} else {
 		if (obj->state == STATE_STOP)
@@ -431,23 +430,28 @@ static ssize_t tfa9xxx_store_activate(struct device *dev,
 	hrtimer_cancel(&obj->active_timer);
 
 	if (obj->state != STATE_STOP) {
-		/* object duration + 5 msecs */
-		int value = tfa2_haptic_get_duration(tfa, obj->index) + 5;
-		/* clip value to max */
-		value = (value > drv->timeout ? drv->timeout : value);
+		/* Since duration could be changed by patterns,
+		 * always set timeout to 10 seconds
+		 */
+		rc = tfa2_haptic_update_duration(&tfa->hap_data, TIMEOUT);
+		if (rc < 0) {
+			dev_err(&drv->i2c->dev,
+					"%s: rc_err : %d\n", __func__, rc);
+			return;
+		}
+
+		val = (val > drv->timeout ? drv->timeout : val);
 		/* run ms timer */
 		hrtimer_start(&obj->active_timer,
-			ktime_set(value / 1000,
-			(value % 1000) * 1000000),
+			ktime_set(val / 1000,
+			(val % 1000) * 1000000),
 			HRTIMER_MODE_REL);
 
-		dev_dbg(&drv->i2c->dev, "%s: start active %d timer of %d msecs\n",
-			__func__, (int)obj->type, value);
+		dev_dbg(&drv->i2c->dev, "[VIB]%s: start active %d timer of %d msecs\n",
+			__func__, (int)obj->type, val);
 	}
 
 	schedule_work(&obj->update_work);
-
-	return count;
 }
 
 int tfa9xxx_bck_starts(struct tfa9xxx *drv)
@@ -463,6 +467,9 @@ int tfa9xxx_bck_starts(struct tfa9xxx *drv)
 
 	if (drv->bck_running)
 		return 0;
+
+	dev_info(&drv->i2c->dev, "%s: clk_users %d\n",
+		__func__, drv->clk_users);
 
 	/* clock enabling is handled in tfa_start(), so update reference count
 	 * instead of calling tfa9xxx_haptic_clock(drv, true)
@@ -489,6 +496,9 @@ int tfa9xxx_bck_stops(struct tfa9xxx *drv)
 
 	if (!drv->bck_running)
 		return 0;
+
+	dev_info(&drv->i2c->dev, "%s: clk_users %d\n",
+		__func__, drv->clk_users);
 
 	drv->bck_running = false;
 
@@ -524,25 +534,6 @@ int tfa9xxx_bck_stops(struct tfa9xxx *drv)
 	}
 
 	return 0;
-}
-
-static ssize_t tfa9xxx_show_activate(struct device *dev,
-	struct device_attribute *attr, char *buf)
-{
-	struct led_classdev *cdev = dev_get_drvdata(dev);
-	struct tfa9xxx *drv = container_of(cdev, struct tfa9xxx, led_dev);
-	int size;
-
-#if defined(PARALLEL_OBJECTS)
-	int state = (drv->tone_object.state != STATE_STOP) ||
-		(drv->wave_object.state != STATE_STOP);
-#else
-	int state = (drv->tone_object.state != STATE_STOP);
-#endif
-
-	size = snprintf(buf, 10, "%d\n", state);
-
-	return size;
 }
 
 static ssize_t tfa9xxx_store_duration(struct device *dev,
@@ -606,7 +597,7 @@ static ssize_t tfa9xxx_show_f0(struct device *dev,
 	if (ret)
 		return -EIO;
 
-	size = snprintf(buf, 15, "%d.%03d\n", 
+	size = snprintf(buf, 15, "%d.%03d\n",
 		TFA2_HAPTIC_FP_INT(f0, FW_XMEM_F0_SHIFT),
 		TFA2_HAPTIC_FP_FRAC(f0, FW_XMEM_F0_SHIFT));
 
@@ -640,7 +631,6 @@ static ssize_t tfa9xxx_show_pll_off_delay(struct device *dev,
 static struct device_attribute tfa9xxx_haptic_attrs[] = {
 	__ATTR(value, 0664, tfa9xxx_show_value, tfa9xxx_store_value),
 	__ATTR(state, 0664, tfa9xxx_show_state, tfa9xxx_store_state),
-	__ATTR(activate, 0664, tfa9xxx_show_activate, tfa9xxx_store_activate),
 	__ATTR(duration, 0664, tfa9xxx_show_duration, tfa9xxx_store_duration),
 };
 
@@ -654,6 +644,8 @@ int tfa9xxx_haptic_probe(struct tfa9xxx *drv)
 	struct i2c_client *i2c = drv->i2c;
 	int failed_attr_idx = 0;
 	int rc, i;
+
+	dev_info(&drv->i2c->dev, "%s\n", __func__);
 
 	drv->timeout = TFA_HAP_MAX_TIMEOUT;
 	drv->pll_off_delay = DEFAULT_PLL_OFF_DELAY;
@@ -719,6 +711,14 @@ int tfa9xxx_haptic_probe(struct tfa9xxx *drv)
 		}
 	}
 
+	drv->motor_dev.name = "vibrator";
+	drv->motor_dev.get_time = tfa9xxx_get_time;
+	drv->motor_dev.enable = tfa9xxx_enable;
+
+	rc = timed_output_dev_register(&drv->motor_dev);
+	if (rc < 0)
+		pr_err("[VIB] failed to register timed output\n");
+
 	return 0;
 
 error_sysfs_led:
@@ -773,5 +773,4 @@ int __init tfa9xxx_haptic_init(void)
 
 void __exit tfa9xxx_haptic_exit(void)
 {
-	return;
 }

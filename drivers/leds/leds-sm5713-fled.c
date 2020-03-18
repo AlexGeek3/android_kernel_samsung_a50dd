@@ -24,7 +24,7 @@ extern struct class *camera_class; /*sys/class/camera*/
 /* for MUIC HV-VBUS control */
 extern int muic_request_disable_afc_state(void);
 extern void sm5713_request_default_power_src(void);
-extern int muic_check_fled_state(bool enable, bool mode);   /* mode:1 = FLED_MODE_TORCH, mode:2 = FLED_MODE_FLASH */
+extern int muic_check_fled_state(bool enable, u8 mode);   /* mode:1 = FLED_MODE_TORCH, mode:2 = FLED_MODE_FLASH */
 extern int sm5713_usbpd_check_fled_state(bool enable, u8 mode);
 
 static void fled_set_mode(struct sm5713_fled_data *fled, u8 fled_index, u8 mode)
@@ -134,8 +134,10 @@ static int sm5713_fled_control(u8 fled_index, u8 fled_mode)
 			fled->torch_on_cnt--;
 			if (fled->torch_on_cnt == 0) {
 				sm5713_charger_oper_push_event(SM5713_CHARGER_OP_EVENT_TORCH, 0);
-				muic_check_fled_state(0, FLED_MODE_TORCH);
-				sm5713_usbpd_check_fled_state(0, FLED_MODE_TORCH);
+				if (fled->flash_prepare_cnt == 0) {
+					muic_check_fled_state(0, FLED_MODE_TORCH);
+					sm5713_usbpd_check_fled_state(0, FLED_MODE_TORCH);
+				}
 			}
 			fled->pdata->led[fled_index].en_mled = false;
 		}
@@ -144,8 +146,6 @@ static int sm5713_fled_control(u8 fled_index, u8 fled_mode)
 			fled->flash_on_cnt--;
 			if (fled->flash_on_cnt == 0) {
 				sm5713_charger_oper_push_event(SM5713_CHARGER_OP_EVENT_FLASH, 0);
-				muic_check_fled_state(0, FLED_MODE_FLASH);
-				sm5713_usbpd_check_fled_state(0, FLED_MODE_FLASH);
 			}
 			fled->pdata->led[fled_index].en_fled = false;
 		}

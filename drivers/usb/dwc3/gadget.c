@@ -292,12 +292,16 @@ void dwc3_gadget_giveback(struct dwc3_ep *dep, struct dwc3_request *req,
 		int status)
 {
 	struct dwc3			*dwc = dep->dwc;
+	struct usb_gadget		*gadget = &dwc->gadget;
+	struct usb_composite_dev	*cdev = get_gadget_data(gadget);
 
 	dwc3_gadget_del_and_unmap_request(dep, req, status);
 
-	spin_unlock(&dwc->lock);
-	usb_gadget_giveback_request(&dep->endpoint, &req->request);
-	spin_lock(&dwc->lock);
+	if (cdev && cdev->gadget) {
+		spin_unlock(&dwc->lock);
+		usb_gadget_giveback_request(&dep->endpoint, &req->request);
+		spin_lock(&dwc->lock);
+	}
 }
 
 /**

@@ -60,14 +60,14 @@
 #define SEC_BAT_CURRENT_EVENT_AFC					0x00001
 #define SEC_BAT_CURRENT_EVENT_CHARGE_DISABLE		0x00002
 #define SEC_BAT_CURRENT_EVENT_SKIP_HEATING_CONTROL	0x00004
-#define SEC_BAT_CURRENT_EVENT_LOW_TEMP_SWELLING		0x00010
+#define SEC_BAT_CURRENT_EVENT_LOW_TEMP_SWELLING		0x00080
 #define SEC_BAT_CURRENT_EVENT_HIGH_TEMP_SWELLING	0x00020
 #if defined(CONFIG_ENABLE_100MA_CHARGING_BEFORE_USB_CONFIGURED)
 #define SEC_BAT_CURRENT_EVENT_USB_100MA			0x00040
 #else
 #define SEC_BAT_CURRENT_EVENT_USB_100MA			0x00000
 #endif
-#define SEC_BAT_CURRENT_EVENT_LOW_TEMP_SWELLING_2ND			0x00080
+#define SEC_BAT_CURRENT_EVENT_LOW_TEMP_SWELLING_2ND			0x00010
 #define SEC_BAT_CURRENT_EVENT_SWELLING_MODE		(SEC_BAT_CURRENT_EVENT_LOW_TEMP_SWELLING | SEC_BAT_CURRENT_EVENT_LOW_TEMP_SWELLING_2ND | SEC_BAT_CURRENT_EVENT_HIGH_TEMP_SWELLING)
 #define SEC_BAT_CURRENT_EVENT_LOW_TEMP_MODE		(SEC_BAT_CURRENT_EVENT_LOW_TEMP_SWELLING | SEC_BAT_CURRENT_EVENT_LOW_TEMP_SWELLING_2ND)
 #define SEC_BAT_CURRENT_EVENT_USB_SUPER			0x00100
@@ -93,6 +93,20 @@
 #define BATT_MISC_EVENT_WIRELESS_AUTH_START     0x00000200
 #define BATT_MISC_EVENT_WIRELESS_AUTH_RECVED    0x00000400
 #define BATT_MISC_EVENT_WIRELESS_AUTH_FAIL      0x00000800
+
+#define BATT_MISC_EVENT_BATTERY_HEALTH			0x000F0000
+
+#define BATTERY_HEALTH_SHIFT                16
+enum misc_battery_health {
+	BATTERY_HEALTH_UNKNOWN = 0,
+	BATTERY_HEALTH_GOOD,
+	BATTERY_HEALTH_NORMAL,
+	BATTERY_HEALTH_AGED,
+	BATTERY_HEALTH_MAX = BATTERY_HEALTH_AGED,
+
+	/* For event */
+	BATTERY_HEALTH_BAD = 0xF,
+};
 
 /* ext_event */
 #define BATT_EXT_EVENT_CAMERA		0x00000001
@@ -461,6 +475,7 @@ struct sec_battery_info {
 #if defined(CONFIG_BATTERY_AGE_FORECAST)
 	int batt_cycle;
 #endif
+	int batt_asoc;
 #if defined(CONFIG_STEP_CHARGING)
 	unsigned int step_charging_type;
 	unsigned int step_charging_charge_power;
@@ -536,6 +551,8 @@ extern int sec_bat_set_charge(struct sec_battery_info *battery, int chg_mode);
 extern int sec_bat_set_charging_current(struct sec_battery_info *battery);
 extern void sec_bat_aging_check(struct sec_battery_info *battery);
 extern void sec_wireless_set_tx_enable(struct sec_battery_info *battery, bool wc_tx_enable);
+
+extern void sec_bat_check_battery_health(struct sec_battery_info *battery);
 
 #if defined(CONFIG_WIRELESS_FIRMWARE_UPDATE)
 extern void sec_bat_fw_update_work(struct sec_battery_info *battery, int mode);

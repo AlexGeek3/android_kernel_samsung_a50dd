@@ -94,7 +94,7 @@ void dropdump_queue_skb(struct sk_buff *skb, u8 pkt_type,
 	if (!dev)
 		return;
 
-	rcu_read_lock();
+	rcu_read_lock_bh();
 	skb->dev = dev;
 
 	list_for_each_entry_rcu(ptype, ptype_list, list) {
@@ -158,7 +158,7 @@ out_unlock:
 	}
 
 	skb->dev = old_dev;
-	rcu_read_unlock();
+	rcu_read_unlock_bh();
 }
 
 void dropdump_queue_precondition(struct sk_buff *skb,

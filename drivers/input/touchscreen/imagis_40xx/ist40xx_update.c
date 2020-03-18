@@ -492,8 +492,6 @@ u32 ist40xx_parse_ver(struct ist40xx_data *data, int flag, const u8 *buf)
 		ver = (u32)buf32[(data->tags.flag_addr + 0x3F4) >> 2];
 	else if (flag == FLAG_FW)
 		ver = (u32)buf32[(data->tags.cfg_addr + 0x4) >> 2];
-	else if (flag == FLAG_CORE)
-		ver = (u32)buf32[(data->tags.flag_addr + 0x3F0) >> 2];
 	else
 		input_err(true, &data->client->dev, "Parsing ver's flag is not corrent!\n");
 
@@ -544,7 +542,7 @@ int ist40xx_miscalibrate(struct ist40xx_data *data)
 
 	mutex_lock(&data->lock);
 
-	ist40xx_cmd_hold(data, IST40XX_ENABLE);
+	ist40xx_reset(data, false);
 
 	ist40xx_cmd_miscalibrate(data);
 
@@ -715,11 +713,11 @@ int ist40xx_tsp_update_info(struct ist40xx_data *data)
 	u32 tsp_lcd, tsp_swap, tsp_scr, tsp_ch;
 	u32 prox_th, baseline_th;
 	u32 recording_info;
+	u32 algo_info;
 	TSP_INFO *tsp = &data->tsp_info;
 
 	data->fw.cur.main_ver = 0;
 	data->fw.cur.fw_ver = 0;
-	data->fw.cur.core_ver = 0;
 	data->fw.cur.test_ver = 0;
 
 	ret = ist40xx_cmd_hold(data, IST40XX_ENABLE);
@@ -756,7 +754,6 @@ int ist40xx_tsp_update_info(struct ist40xx_data *data)
 
 	data->fw.cur.main_ver = info[IST40XX_CMD_VALUE(eHCOM_GET_VER_MAIN)];
 	data->fw.cur.fw_ver = info[IST40XX_CMD_VALUE(eHCOM_GET_VER_FW)];
-	data->fw.cur.core_ver = info[IST40XX_CMD_VALUE(eHCOM_GET_VER_CORE)];
 	data->fw.cur.test_ver = info[IST40XX_CMD_VALUE(eHCOM_GET_VER_TEST)];
 	tsp_lcd = info[IST40XX_CMD_VALUE(eHCOM_GET_LCD_INFO)];
 	tsp_ch = info[IST40XX_CMD_VALUE(eHCOM_GET_TSP_INFO)];
@@ -764,6 +761,7 @@ int ist40xx_tsp_update_info(struct ist40xx_data *data)
 	tsp_swap = info[IST40XX_CMD_VALUE(eHCOM_GET_SWAP_INFO)];
 	baseline_th = info[IST40XX_CMD_VALUE(eHCOM_GET_BASELINE_TH)];
 	recording_info = info[IST40XX_CMD_VALUE(eHCOM_GET_REC_INFO_BASE)];
+	algo_info = info[IST40XX_CMD_VALUE(eHCOM_GET_ALGOINFO)];
 	prox_th = info[IST40XX_CMD_VALUE(eHCOM_GET_PROXIMITY_TH)];
 
 	data->gap_spec = info[IST40XX_CMD_VALUE(eHCOM_GET_GAP_SPEC)] & 0xFFFF;
@@ -787,6 +785,9 @@ int ist40xx_tsp_update_info(struct ist40xx_data *data)
 
 	data->rec_addr = recording_info & 0xFFFF;
 	data->rec_size = (recording_info >> 16) & 0xFFFF;
+
+	data->algo_addr = algo_info & 0xFFFF;
+	data->algo_size = (algo_info >> 16) & 0xFFFF;
 
 	tsp->ch_num.rx = (tsp_ch >> 16) & 0xFFFF;
 	tsp->ch_num.tx = tsp_ch & 0xFFFF;
@@ -873,9 +874,8 @@ void ist40xx_print_info(struct ist40xx_data *data)
 	input_info(true, &data->client->dev, " copy sec info addr: 0x%08X\n",
 			data->copy_sec_info_addr);
 	input_info(true, &data->client->dev,
-			"IC version main: %x, fw: %x, test: %x, core: %x\n",
-			data->fw.cur.main_ver, data->fw.cur.fw_ver, data->fw.cur.test_ver,
-			data->fw.cur.core_ver);
+			"IC version main: %x, fw: %x, test: %x\n",
+			data->fw.cur.main_ver, data->fw.cur.fw_ver, data->fw.cur.test_ver);
 }
 
 #define update_next_step(ret)	{ if (ret) goto end; }
@@ -887,13 +887,11 @@ int ist40xx_fw_update(struct ist40xx_data *data, const u8 *buf, int size)
 	u32 main_ver = ist40xx_parse_ver(data, FLAG_MAIN, buf);
 	u32 fw_ver = ist40xx_parse_ver(data, FLAG_FW, buf);
 	u32 test_ver = ist40xx_parse_ver(data, FLAG_TEST, buf);
-	u32 core_ver = ist40xx_parse_ver(data, FLAG_CORE, buf);
 
 	input_info(true, &data->client->dev, "*** Firmware update ***\n");
 	input_info(true, &data->client->dev,
-		   " main: %x, fw: %x, test: %x, core: %x(addr: 0x%x ~ 0x%x)\n",
-		   main_ver, fw_ver, test_ver, core_ver, fw->index,
-		   (fw->index + fw->size));
+		   " main: %x, fw: %x, test: %x(addr: 0x%x ~ 0x%x)\n",
+		   main_ver, fw_ver, test_ver, fw->index, (fw->index + fw->size));
 
 	data->status.update = 1;
 	data->status.update_result = 0;
@@ -943,6 +941,12 @@ int ist40xx_fw_recovery(struct ist40xx_data *data)
 #ifdef TCLM_CONCEPT
 	int rc;
 #endif
+
+	if (data->dt_data->bringup == 1) {
+		input_info(true, &data->client->dev, "%s skip (bringup 1)\n", __func__);
+		return ret;
+	}
+
 	ret = ist40xx_get_update_info(data, fw, fw_size);
 	if (ret) {
 		data->status.update_result = 1;
@@ -952,7 +956,6 @@ int ist40xx_fw_recovery(struct ist40xx_data *data)
 	data->fw.bin.main_ver = ist40xx_parse_ver(data, FLAG_MAIN, fw);
 	data->fw.bin.fw_ver = ist40xx_parse_ver(data, FLAG_FW, fw);
 	data->fw.bin.test_ver = ist40xx_parse_ver(data, FLAG_TEST, fw);
-	data->fw.bin.core_ver = ist40xx_parse_ver(data, FLAG_CORE, fw);
 
 	mutex_lock(&data->lock);
 	ret = ist40xx_fw_update(data, fw, fw_size);
@@ -993,12 +996,11 @@ int ist40xx_check_auto_update(struct ist40xx_data *data)
 		ist40xx_delay(100);
 		ret = ist40xx_read_cmd(data, eHCOM_GET_CHIP_ID, &chip_id);
 		if (ret == 0) {
-			if (chip_id == IST40XX_CHIP_ID)
+			if (chip_id == IST40XX_CHIP_ID) {
 				tsp_check = true;
-
-			break;
+				break;
+			}
 		}
-
 		ist40xx_reset(data, false);
 	}
 
@@ -1079,6 +1081,11 @@ int ist40xx_auto_bin_update(struct ist40xx_data *data)
 	int rc = 0;
 #endif
 
+	if (data->dt_data->bringup == 1) {
+		input_info(true, &data->client->dev, "%s skip (bringup 1)\n", __func__);
+		return true;
+	}
+
 	ret = request_firmware(&firmware, data->dt_data->fw_path,
 			&data->client->dev);
 	if (ret) {
@@ -1110,12 +1117,10 @@ int ist40xx_auto_bin_update(struct ist40xx_data *data)
 	fw->bin.main_ver = ist40xx_parse_ver(data, FLAG_MAIN, fw->buf);
 	fw->bin.fw_ver = ist40xx_parse_ver(data, FLAG_FW, fw->buf);
 	fw->bin.test_ver = ist40xx_parse_ver(data, FLAG_TEST, fw->buf);
-	fw->bin.core_ver = ist40xx_parse_ver(data, FLAG_CORE, fw->buf);
 
 	input_info(true, &data->client->dev,
-		   "IC: %x, Binary ver main: %x, fw: %x, test: %x, core: %x\n",
-		   data->chip_id, fw->bin.main_ver, fw->bin.fw_ver, fw->bin.test_ver,
-		   fw->bin.core_ver);
+		   "IC: %x, Binary ver main: %x, fw: %x, test: %x\n",
+		   data->chip_id, fw->bin.main_ver, fw->bin.fw_ver, fw->bin.test_ver);
 
 	mutex_lock(&data->lock);
 	ret = ist40xx_check_auto_update(data);
@@ -1128,9 +1133,9 @@ int ist40xx_auto_bin_update(struct ist40xx_data *data)
 	}
 
 	input_info(true, &data->client->dev,
-		  "Update version. fw(main, test, core): %x(%x, %x, %x)-> %x(%x, %x, %x)\n",
-		  fw->cur.fw_ver, fw->cur.main_ver, fw->cur.test_ver, fw->cur.core_ver,
-		  fw->bin.fw_ver, fw->bin.main_ver, fw->bin.test_ver, fw->bin.core_ver);
+		  "Update version. fw(main, test): %x(%x, %x)-> %x(%x, %x)\n",
+		  fw->cur.fw_ver, fw->cur.main_ver, fw->cur.test_ver,
+		  fw->bin.fw_ver, fw->bin.main_ver, fw->bin.test_ver);
 
 	mutex_lock(&data->lock);
 	while (retry--) {
@@ -1428,11 +1433,11 @@ ssize_t ist40xx_fw_status_show(struct device *dev,
 		if (data->status.update_result) {
 			count = sprintf(buf, "Update fail\n");
 		} else {
-			count = sprintf(buf, "Update success, ver %x(%x, %x, %x), "
+			count = sprintf(buf, "Update success, ver %x(%x, %x), "
 					"SLF status : %d, gap : %d, MTL status : %d, gap : %d, "
 					"PROX status : %d, gap : %d\n",
 					data->fw.cur.fw_ver, data->fw.cur.main_ver,
-					data->fw.cur.test_ver, data->fw.cur.core_ver,
+					data->fw.cur.test_ver,
 					CALIB_TO_STATUS(data->status.calib_msg[0]),
 					CALIB_TO_GAP(data->status.calib_msg[0]),
 					CALIB_TO_STATUS(data->status.calib_msg[1]),
@@ -1464,6 +1469,7 @@ ssize_t ist40xx_fw_read_show(struct device *dev, struct device_attribute *attr,
 	u8 *fwbuf = NULL;
 	struct ist40xx_data *data = dev_get_drvdata(dev);
 
+	count = sprintf(buf, "Fail\n");  // Prevent CID: 57387
 	mutex_lock(&data->lock);
 	ist40xx_disable_irq(data);
 
@@ -1533,6 +1539,7 @@ ssize_t ist40xx_ium_read_show(struct device *dev, struct device_attribute *attr,
 	u8 *fwbuf = NULL;
 	struct ist40xx_data *data = dev_get_drvdata(dev);
 
+	count = sprintf(buf, "Fail\n");  // Prevent CID: 57388
 	mutex_lock(&data->lock);
 	ist40xx_disable_irq(data);
 
@@ -1596,9 +1603,9 @@ ssize_t ist40xx_fw_version_show(struct device *dev,
 	int count;
 	struct ist40xx_data *data = dev_get_drvdata(dev);
 
-	count = sprintf(buf, "ID: %x, main: %x, fw: %x, test: %x, core: %x\n",
+	count = sprintf(buf, "ID: %x, main: %x, fw: %x, test: %x\n",
 			data->chip_id, data->fw.cur.main_ver, data->fw.cur.fw_ver,
-			data->fw.cur.test_ver, data->fw.cur.core_ver);
+			data->fw.cur.test_ver);
 
 	{
 		char msg[128];
@@ -1607,11 +1614,10 @@ ssize_t ist40xx_fw_version_show(struct device *dev,
 		ret = ist40xx_get_update_info(data, data->fw.buf, data->fw.buf_size);
 		if (ret == 0) {
 			count += sprintf(msg,
-					" Header - main: %x, fw: %x, test: %x, core: %x\n",
+					" Header - main: %x, fw: %x, test: %x\n",
 					ist40xx_parse_ver(data, FLAG_MAIN, data->fw.buf),
 					ist40xx_parse_ver(data, FLAG_FW, data->fw.buf),
-					ist40xx_parse_ver(data, FLAG_TEST, data->fw.buf),
-					ist40xx_parse_ver(data, FLAG_CORE, data->fw.buf));
+					ist40xx_parse_ver(data, FLAG_TEST, data->fw.buf));
 			strcat(buf, msg);
 		}
 	}

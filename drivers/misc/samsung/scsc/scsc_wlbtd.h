@@ -69,6 +69,9 @@ enum scsc_wlbtd_response_codes {
 	SCSC_WLBTD_OTHER_ERR_SABLE_FILE,
 	SCSC_WLBTD_OTHER_ERR_TAR,
 	SCSC_WLBTD_OTHER_IGNORE_TRIGGER,
+
+	/* Keep this as last entry */
+	SCSC_WLBTD_LAST_RESPONSE_CODE,
 };
 
 static const struct genl_multicast_group scsc_mcgrp[] = {
@@ -80,4 +83,5 @@ int scsc_wlbtd_deinit(void);
 int call_wlbtd(const char *script_path);
 int wlbtd_write_file(const char *path, const char *content);
 int call_wlbtd_sable(u8 trigger_code, u16 reason_code);
+void scsc_wlbtd_wait_for_sable_logging(void);
 int scsc_wlbtd_get_and_print_build_type(void);

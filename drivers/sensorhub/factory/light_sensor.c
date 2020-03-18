@@ -12,6 +12,7 @@
  *  GNU General Public License for more details.
  *
  */
+#include <linux/slab.h>
 #include "../ssp.h"
 #include "../sensors_core.h"
 #include "../ssp_data.h"
@@ -117,6 +118,9 @@ void select_light_ops(struct ssp_data *data)
 #if defined(CONFIG_SENSORS_SSP_LIGHT_TCS3701)
 	count++;
 #endif
+#if defined(CONFIG_SENSORS_SSP_LIGHT_VEML3328)
+	count++;
+#endif
 
 	if(count == 0)
 	{
@@ -135,6 +139,9 @@ void select_light_ops(struct ssp_data *data)
 #endif
 #if defined(CONFIG_SENSORS_SSP_LIGHT_TCS3701)
 	light_ops_ary[i++] = get_light_tcs3701_function_pointer(data);
+#endif
+#if defined(CONFIG_SENSORS_SSP_LIGHT_VEML3328)
+	light_ops_ary[i++] = get_light_veml3328_function_pointer(data);
 #endif
 
 	if(count > 1) {
@@ -172,6 +179,8 @@ void initialize_light_factorytest(struct ssp_data *data)
 	data->light_ops = get_light_tmd3725_function_pointer(data);
 #elif defined(CONFIG_SENSORS_SSP_LIGHT_TCS3701)
 	data->light_ops = get_light_tcs3701_function_pointer(data);
+#elif defined(CONFIG_SENSORS_SSP_LIGHT_VEML3328)
+	data->light_ops = get_light_veml3328_function_pointer(data);
 #endif
 
 	sensors_register(data->devices[SENSOR_TYPE_LIGHT], data, light_attrs,

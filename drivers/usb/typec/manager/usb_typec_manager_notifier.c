@@ -22,7 +22,7 @@
 #include <linux/fs.h>
 #include <linux/uaccess.h>
 #include <linux/workqueue.h>
-#include <linux/sec_sysfs.h>
+#include <linux/sec_class.h>
 #include <linux/sec_batt.h>
 
 #if defined(CONFIG_VBUS_NOTIFIER)

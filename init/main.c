@@ -107,6 +107,11 @@
 #include <linux/rkp.h>
 #endif
 
+#ifdef CONFIG_SECURITY_DEFEX
+#include <linux/defex.h>
+void __init __weak defex_load_rules(void) { }
+#endif
+
 static int kernel_init(void *);
 
 extern void init_IRQ(void);
@@ -537,6 +542,7 @@ static void __init mm_init(void)
 	 */
 	page_ext_init_flatmem();
 	mem_init();
+	set_memsize_kernel_type(MEMSIZE_KERNEL_STOP);
 	kmem_cache_init();
 	pgtable_init();
 	vmalloc_init();
@@ -545,7 +551,6 @@ static void __init mm_init(void)
 	init_espfix_bsp();
 	/* Should be run after espfix64 is set up. */
 	pti_init();
-	set_memsize_kernel_type(MEMSIZE_KERNEL_OTHERS);
 }
 #ifdef CONFIG_UH_RKP
 rkp_init_t rkp_init_data __rkp_ro = {
@@ -593,10 +598,14 @@ static void __init rkp_robuffer_init(void)
 #ifdef CONFIG_RKP_KDP
 #define VERITY_PARAM_LENGTH 20
 static char verifiedbootstate[VERITY_PARAM_LENGTH];
+int __check_verifiedboot __kdp_ro = 0;
 static int __init verifiedboot_state_setup(char *str)
 {
 	strlcpy(verifiedbootstate, str, sizeof(verifiedbootstate));
-	return 1;
+
+	if(!strncmp(verifiedbootstate, "orange", sizeof("orange")))
+		__check_verifiedboot = 1;
+	return 0;
 }
 __setup("androidboot.verifiedbootstate=", verifiedboot_state_setup);
 
@@ -675,7 +684,9 @@ asmlinkage __visible void __init start_kernel(void)
 	build_all_zonelists(NULL);
 	page_alloc_init();
 
+#if !defined(CONFIG_SAMSUNG_PRODUCT_SHIP)
 	pr_notice("Kernel command line: %s\n", boot_command_line);
+#endif
 	parse_early_param();
 	after_dashes = parse_args("Booting kernel",
 				  static_command_line, __start___param,
@@ -841,7 +852,6 @@ asmlinkage __visible void __init start_kernel(void)
 		efi_free_boot_services();
 	}
 
-	set_memsize_kernel_type(MEMSIZE_KERNEL_STOP);
 	/* Do the rest non-__init'ed, we're now alive */
 	rest_init();
 }
@@ -1299,4 +1309,7 @@ static noinline void __init kernel_init_freeable(void)
 
 	integrity_load_keys();
 	load_default_modules();
+#ifdef CONFIG_SECURITY_DEFEX
+	defex_load_rules();
+#endif
 }

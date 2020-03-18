@@ -29,4 +29,7 @@ void ssp_scontext_log(const char *func_name,
                               const char *data, int length);
 int ssp_scontext_initialize(struct ssp_data *ssp_data);
 void ssp_scontext_remove(struct ssp_data *ssp_data);
+
+
+void get_ss_sensor_name(struct ssp_data *data, int type, char *buf, int buf_size);
 #endif /*__SSP_SCONTEXT_H__*/

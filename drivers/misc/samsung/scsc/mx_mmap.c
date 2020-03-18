@@ -348,6 +348,10 @@ void client_gdb_probe(struct gdb_transport_client *gdb_client, struct gdb_transp
 
 	if (gdb_transport->type == GDB_TRANSPORT_M4)
 		snprintf(dev_name, sizeof(dev_name), "%s_%d_%s", "mx", (int)uid, "m4_gdb");
+#ifdef CONFIG_SCSC_MX450_GDB_SUPPORT
+	else if (gdb_transport->type == GDB_TRANSPORT_M4_1)
+		snprintf(dev_name, sizeof(dev_name), "%s_%d_%s", "mx", (int)uid, "m4_1_gdb");
+#endif
 	else
 		snprintf(dev_name, sizeof(dev_name), "%s_%d_%s", "mx", (int)uid, "r4_gdb");
 

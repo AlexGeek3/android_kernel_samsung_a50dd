@@ -335,16 +335,16 @@ int vipx_hw_execute_graph(struct vipx_interface *itf, struct vipx_task *itask)
 	vipx_dbg("macro_sc_offset : %u\n", einfo->macro_sg_offset);
 	vipx_dbg("num_input : %u\n", einfo->num_input);
 	for (idx = 0; idx < einfo->num_input; ++idx) {
-		debug_addr = (int *)&einfo->input[idx][0];
-		for (iter = 0; iter < sizeof(einfo->input[0][0]) >> 2; ++iter)
+		debug_addr = (int *)&einfo->input[idx];
+		for (iter = 0; iter < sizeof(einfo->input[0]) >> 2; ++iter)
 			vipx_dbg("[%3d][%3d] %#10x\n",
 					idx, iter, debug_addr[iter]);
 	}
 
 	vipx_dbg("num_output : %u\n", einfo->num_output);
 	for (idx = 0; idx < einfo->num_output; ++idx) {
-		debug_addr = (int *)&einfo->output[idx][0];
-		for (iter = 0; iter < sizeof(einfo->output[0][0]) >> 2; ++iter)
+		debug_addr = (int *)&einfo->output[idx];
+		for (iter = 0; iter < sizeof(einfo->output[0]) >> 2; ++iter)
 			vipx_dbg("[%3d][%3d] %#10x\n",
 					idx, iter, debug_addr[iter]);
 	}
@@ -625,11 +625,6 @@ static void __vipx_interface_isr(void *data)
 	vipx_leave();
 }
 
-/* TODO temp code */
-extern void *vertex_interface_data;
-extern irqreturn_t vertex_interface_isr0(int irq, void *data);
-extern irqreturn_t vertex_interface_isr1(int irq, void *data);
-
 static irqreturn_t vipx_interface_isr0(int irq, void *data)
 {
 	struct vipx_interface *itf;
@@ -645,10 +640,7 @@ static irqreturn_t vipx_interface_isr0(int irq, void *data)
 		val &= ~(0x1);
 		sys->ctrl_ops->clear_irq(sys, IRQ_FROM_DEVICE, val);
 
-		if (test_bit(VIPX_ITF_STATE_OPEN, &itf->state))
-			__vipx_interface_isr(data);
-		else
-			vertex_interface_isr0(irq, vertex_interface_data);
+		__vipx_interface_isr(data);
 	}
 
 	vipx_leave();
@@ -670,10 +662,7 @@ static irqreturn_t vipx_interface_isr1(int irq, void *data)
 		val &= ~(0x1 << 0x1);
 		sys->ctrl_ops->clear_irq(sys, IRQ_FROM_DEVICE, val);
 
-		if (test_bit(VIPX_ITF_STATE_OPEN, &itf->state))
-			__vipx_interface_isr(data);
-		else
-			vertex_interface_isr1(irq, vertex_interface_data);
+		__vipx_interface_isr(data);
 	}
 
 	vipx_leave();

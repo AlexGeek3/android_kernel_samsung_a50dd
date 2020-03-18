@@ -27,9 +27,10 @@ struct fscrypt_operations {
 	const char *key_prefix;
 	int (*get_context)(struct inode *, void *, size_t);
 	int (*set_context)(struct inode *, const void *, size_t, void *);
+	unsigned long long (*get_dun)(const struct inode *, pgoff_t p);
 #ifdef CONFIG_DDAR
 	int (*get_knox_context)(struct inode *, const char *, void *, size_t);
-	int (*set_knox_context)(struct inode *, const char *, const void *, size_t);
+	int (*set_knox_context)(struct inode *, const char *, const void *, size_t, void *);
 #endif
 	bool (*dummy_context)(struct inode *);
 	bool (*empty_dir)(struct inode *);
@@ -193,9 +194,6 @@ extern void fscrypt_enqueue_decrypt_bio(struct fscrypt_ctx *ctx,
 extern void fscrypt_pullback_bio_page(struct page **, bool);
 extern int fscrypt_zeroout_range(const struct inode *, pgoff_t, sector_t,
 				 unsigned int);
-void fscrypt_set_bio(const struct inode *inode, struct bio *bio);
-void *fscrypt_get_diskcipher(const struct inode *inode);
-int fscrypt_disk_encrypted(const struct inode *inode);
 
 /* hooks.c */
 extern int fscrypt_file_open(struct inode *inode, struct file *filp);

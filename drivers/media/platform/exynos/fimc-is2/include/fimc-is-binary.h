@@ -101,6 +101,7 @@
 #define HEAP_RTA_START		(HEAP_START + SZ_64M)		/* HEAP_SIZE(for DDK) should be smaller than 64MB */
 #define HEAP_RTA_SIZE		(FIMC_IS_RESERVE_LIB_SIZE)	/* 6MB ~ */
 #define TAAISP_DMA_SIZE		(FIMC_IS_TAAISP_SIZE)	/* 512KB */
+#define MEDRC_DMA_SIZE		(TAAISP_MEDRC_SIZE)
 #define LHFD_MAP_SIZE		(0x009F0000)	/* 9.9375MB */
 #define VRA_DMA_SIZE		(FIMC_IS_VRA_SIZE)	/* 8MB */
 #define MCSC_DNR_DMA_SIZE	(FIMC_IS_MCSC_DNR_SIZE)
@@ -129,34 +130,48 @@
 #define FROM_PDAF_BASE		(0x5000)
 #endif
 
-#define FIMC_IS_FW_BASE_MASK			((1 << 26) - 1)
-#define FIMC_IS_VERSION_SIZE			42
-#define FIMC_IS_VERSION_BIN_SIZE		44
 #ifdef USE_BINARY_PADDING_DATA_ADDED
-#define FIMC_IS_SIGNATURE_SIZE			528
-#define DDK_VERSION_OFFSET			(FIMC_IS_VERSION_BIN_SIZE + FIMC_IS_SIGNATURE_SIZE)
-#define RTA_VERSION_OFFSET			(FIMC_IS_VERSION_BIN_SIZE + FIMC_IS_SIGNATURE_SIZE)
+#define IS_SIGNATURE_LEN	528
 #else
-#define DDK_VERSION_OFFSET			(FIMC_IS_VERSION_BIN_SIZE)
-#define RTA_VERSION_OFFSET			(FIMC_IS_VERSION_BIN_SIZE)
+#define IS_SIGNATURE_LEN	0
 #endif
-#define FIMC_IS_SETFILE_VER_OFFSET		0x40
-#define FIMC_IS_SETFILE_VER_SIZE		52
 
-#define FIMC_IS_REAR_CAL			"rear_cal_data.bin"
-#define FIMC_IS_FRONT_CAL			"front_cal_data.bin"
-#define FIMC_IS_CAL_SDCARD			"/data/cal_data.bin"
-#define FIMC_IS_CAL_RETRY_CNT			(2)
-#define FIMC_IS_FW_RETRY_CNT			(2)
-#define FIMC_IS_CAL_VER_SIZE			(12)
+#define LIBRARY_VER_LEN		44
+#define LIBRARY_VER_OFS		(LIBRARY_VER_LEN + IS_SIGNATURE_LEN)
+#define SETFILE_VER_LEN		52
+#define SETFILE_VER_OFS		64
 
-enum fimc_is_bin_type {
-	FIMC_IS_BIN_FW = 0,
-	FIMC_IS_BIN_SETFILE,
-	FIMC_IS_BIN_DDK_LIBRARY,
-	FIMC_IS_BIN_RTA_LIBRARY,
-	FIMC_IS_BIN_COMPANION,
+#define FIMC_IS_REAR_CAL		"rear_cal_data.bin"
+#define FIMC_IS_FRONT_CAL		"front_cal_data.bin"
+#define FIMC_IS_CAL_SDCARD		"/data/cal_data.bin"
+#define FIMC_IS_CAL_RETRY_CNT		(2)
+#define FIMC_IS_FW_RETRY_CNT		(2)
+#define FIMC_IS_CAL_VER_SIZE		(12)
+
+/*
+ * binary types for IS
+ *
+ * library based on type(DDK, RTA)
+ * setfile based on sensor positon
+ */
+enum is_bin_type {
+	IS_BIN_LIBRARY,
+	IS_BIN_SETFILE,
 };
+
+struct is_bin_ver_info {
+	enum is_bin_type type;
+	unsigned int maxhint;
+	unsigned int offset;
+	unsigned int length;
+	void *s;
+
+	char *(*get_buf)(const struct is_bin_ver_info *info, unsigned int hint);
+	unsigned int (*get_name_idx)(unsigned int hint);
+};
+
+#define IS_BIN_LIB_HINT_DDK	0
+#define IS_BIN_LIB_HINT_RTA	1
 
 struct fimc_is_binary {
 	void *data;
@@ -186,5 +201,9 @@ int request_binary(struct fimc_is_binary *bin, const char *path,
 				const char *name, struct device *device);
 void release_binary(struct fimc_is_binary *bin);
 int was_loaded_by(struct fimc_is_binary *bin);
+
+/* FIXME: void carve_binary_version(enum is_bin_type type, int hint, struct fimc_is_binary *bin); */
+int carve_binary_version(enum is_bin_type type, unsigned int hint, void *data, size_t size);
+char *get_binary_version(enum is_bin_type type, unsigned int hint);
 
 #endif

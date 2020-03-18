@@ -251,14 +251,12 @@ void *ipc_get_chub_map(void)
 		ipc_get_base(IPC_REG_LOG), ipc_get_offset(IPC_REG_LOG),
 		ipc_get_base(IPC_REG_PERSISTBUF), ipc_get_offset(IPC_REG_PERSISTBUF));
 
-#ifndef USE_IPC_BUF
 	CSP_PRINTF_INFO
 		("%s: ipc_map data_ch:size:%d on %d channel. evt_ch:%d\n",
 			NAME_PREFIX, PACKET_SIZE_MAX, IPC_CH_BUF_NUM, IPC_EVT_NUM);
 #ifdef SEOS
 	if (PACKET_SIZE_MAX < NANOHUB_PACKET_SIZE_MAX)
 		CSP_PRINTF_ERROR("%s: %d should be bigger than %d\n", NAME_PREFIX, PACKET_SIZE_MAX, NANOHUB_PACKET_SIZE_MAX);
-#endif
 #endif
 
 	return ipc_map;
@@ -281,20 +279,21 @@ static inline void busywait(u32 ms)
 }
 #endif
 
-#ifndef USE_IPC_BUF
 static inline bool __ipc_queue_empty(struct ipc_buf *ipc_data)
 {
-	return (ipc_data->eq == ipc_data->dq);
+	return (__raw_readl(&ipc_data->eq) == ipc_data->dq);
 }
 
 static inline bool __ipc_queue_full(struct ipc_buf *ipc_data)
 {
-	return (((ipc_data->eq + 1) % IPC_CH_BUF_NUM) == ipc_data->dq);
+	return (((ipc_data->eq + 1) % IPC_CH_BUF_NUM) == __raw_readl(&ipc_data->dq));
 }
 
-static inline void data_dir_to_reg(enum ipc_data_list dir)
+static inline bool __ipc_queue_index_check(struct ipc_buf *ipc_data)
 {
+	return ((ipc_data->eq >= IPC_CH_BUF_NUM) || (ipc_data->dq >= IPC_CH_BUF_NUM));
 }
+
 
 int ipc_write_data(enum ipc_data_list dir, void *tx, u16 length)
 {
@@ -303,6 +302,11 @@ int ipc_write_data(enum ipc_data_list dir, void *tx, u16 length)
 	struct ipc_buf *ipc_data = ipc_get_base(reg);
 
 	if (length <= PACKET_SIZE_MAX) {
+		if (__ipc_queue_index_check(ipc_data)) {
+			CSP_PRINTF_ERROR("%s:%s: failed by ipc index corrupt\n", NAME_PREFIX, __func__);
+			return -EINVAL;
+		}
+
 		DISABLE_IRQ();
 		if (!__ipc_queue_full(ipc_data)) {
 			struct ipc_channel_buf *ipc;
@@ -347,6 +351,11 @@ void *ipc_read_data(enum ipc_data_list dir, u32 *len)
 	struct ipc_buf *ipc_data = ipc_get_base(reg);
 	void *buf = NULL;
 
+	if (__ipc_queue_index_check(ipc_data)) {
+		CSP_PRINTF_ERROR("%s:%s: failed by ipc index corrupt\n", NAME_PREFIX, __func__);
+		return NULL;
+	}
+
 	DISABLE_IRQ();
 	if (!__ipc_queue_empty(ipc_data)) {
 		struct ipc_channel_buf *ipc;
@@ -359,223 +368,6 @@ void *ipc_read_data(enum ipc_data_list dir, u32 *len)
 	ENABLE_IRQ();
 	return buf;
 }
-#else
-static inline void ipc_copy_bytes(u8 *dst, u8 *src, int size)
-{
-	int i;
-
-	/* max 2 bytes optimize */
-	for (i = 0; i < size; i++)
-		*dst++ = *src++;
-}
-
-#define INC_QIDX(i) (((i) == IPC_DATA_SIZE) ? 0 : (i))
-static inline int ipc_io_data(enum ipc_data_list dir, u8 *buf, u16 length)
-{
-	struct ipc_buf *ipc_data;
-	u32 eq;
-	u32 dq;
-	int useful = 0;
-	u8 size_lower;
-	u8 size_upper;
-	u16 size_to_read;
-	u32 size_to_copy_top;
-	u32 size_to_copy_bottom;
-	enum ipc_region reg = (dir == IPC_DATA_C2A) ? IPC_REG_IPC_C2A : IPC_REG_IPC_A2C;
-
-	/* get ipc_data base */
-	ipc_data = ipc_get_base(reg);
-	eq = ipc_data->eq;
-	dq = ipc_data->dq;
-
-	/* check index due to sram corruption */
-	if ((eq > IPC_DATA_SIZE) || (dq > IPC_DATA_SIZE) ||
-		(ipc_data->full > 1) || (ipc_data->empty > 1)) {
-		 CSP_PRINTF_ERROR("%s: %s: invalid index: eq:%d, dq:%d, full:%d, empty:%d\n",
-			NAME_PREFIX, __func__, eq, dq, ipc_data->full, ipc_data->empty);
-		return -1;
-	}
-
-#ifdef USE_IPC_BUF_LOG
-	CSP_PRINTF_INFO("%s: %s: dir:%s, e:%d d:%d, empty:%d, full:%d, ipc_data:%p, len:%d\n",
-		NAME_PREFIX, __func__, dir ? "a2c" : "c2a", ipc_data->cnt, eq, dq, ipc_data->empty,
-		ipc_data->full, ipc_data, length);
-#endif
-
-	if (length) {
-		/* write data */
-		/* calc the unused area on ipc buffer */
-		if (eq > dq)
-			useful = dq + (IPC_DATA_SIZE - eq);
-		else if (eq < dq)
-			useful = dq - eq;
-		else if (ipc_data->full) {
-			CSP_PRINTF_ERROR("%s: %s is full(eq:%d, dq:%d, f:%d, e:%d)\n",
-				NAME_PREFIX, __func__, ipc_data->eq, ipc_data->dq, ipc_data->full, ipc_data->empty);
-			return -1;
-		} else {
-			useful = IPC_DATA_SIZE;
-		}
-
-#ifdef USE_IPC_BUF_LOG
-		CSP_PRINTF_INFO("%s: w: eq:%d, dq:%d, useful:%d\n",	NAME_PREFIX, eq, dq, useful);
-#endif
-		/* check length */
-		if (length + sizeof(u16) > useful) {
-			CSP_PRINTF_ERROR
-				("%s: %s: no buffer. len:%d, remain:%d eq:%d, dq:%d (eq:%d, dq:%d, f:%d, e:%d)\n",
-				NAME_PREFIX, __func__, length, useful, eq, dq, ipc_data->eq, ipc_data->dq, ipc_data->full, ipc_data->empty);
-			return -1;
-		}
-
-		size_upper = (length >> 8);
-		size_lower = length & 0xff;
-		ipc_data->buf[eq++] = size_lower;
-
-		/* write size */
-		if (eq == IPC_DATA_SIZE)
-			eq = 0;
-
-		ipc_data->buf[eq++] = size_upper;
-		if (eq == IPC_DATA_SIZE)
-			eq = 0;
-
-		/* write data */
-		if (eq + length > IPC_DATA_SIZE) {
-			size_to_copy_top = IPC_DATA_SIZE - eq;
-			size_to_copy_bottom = length - size_to_copy_top;
-			ipc_copy_bytes(&ipc_data->buf[eq], buf, size_to_copy_top);
-			ipc_copy_bytes(&ipc_data->buf[0], &buf[size_to_copy_top], size_to_copy_bottom);
-			eq = size_to_copy_bottom;
-		} else {
-			ipc_copy_bytes(&ipc_data->buf[eq], buf, length);
-			eq += length;
-			if (eq == IPC_DATA_SIZE)
-				eq = 0;
-		}
-
-		/* update queue index */
-		ipc_data->eq = eq;
-
-		if (ipc_data->eq == ipc_data->dq)
-			ipc_data->full = 1;
-
-		if (ipc_data->empty)
-			ipc_data->empty = 0;
-
-#ifdef USE_IPC_BUF_LOG
-		CSP_PRINTF_INFO("%s: w_out: eq:%d, dq:%d, f:%d, e:%d\n",
-			NAME_PREFIX, ipc_data->eq, ipc_data->dq, ipc_data->full, ipc_data->empty);
-#endif
-		return 0;
-	} else {
-		/* read data */
-		/* calc the unused area on ipc buffer */
-		if (eq > dq)
-			useful = eq - dq;
-		else if (eq < dq)
-			useful = (IPC_DATA_SIZE - dq) + eq;
-		else if (ipc_data->empty) {
-			CSP_PRINTF_ERROR("%s: %s is empty (eq:%d, dq:%d, f:%d, e:%d)\n",
-				NAME_PREFIX, __func__, ipc_data->eq, ipc_data->dq, ipc_data->full, ipc_data->empty);
-			return 0;
-		} else {
-			useful = IPC_DATA_SIZE;
-		}
-
-		/* read size */
-		size_lower = ipc_data->buf[dq++];
-		if (dq == IPC_DATA_SIZE)
-			dq = 0;
-
-		size_upper = ipc_data->buf[dq++];
-		if (dq == IPC_DATA_SIZE)
-			dq = 0;
-
-		size_to_read = (size_upper << 8) | size_lower;
-		if (size_to_read > PACKET_SIZE_MAX) {
-			CSP_PRINTF_ERROR("%s: %s: wrong size:%d\n",
-				NAME_PREFIX, __func__, size_to_read);
-			return -1;
-		}
-
-#ifdef USE_IPC_BUF_LOG
-		CSP_PRINTF_INFO("%s: r: eq:%d, dq:%d, useful:%d, size_to_read:%d\n",
-			NAME_PREFIX, eq, dq, useful, size_to_read);
-#endif
-
-		if (useful < sizeof(u16) + size_to_read) {
-			CSP_PRINTF_ERROR("%s: %s: no enough read size: useful:%d, read_to_size:%d,%d (eq:%d, dq:%d, f:%d, e:%d)\n",
-				NAME_PREFIX, __func__, useful, size_to_read, sizeof(u16),
-				ipc_data->eq, ipc_data->dq, ipc_data->full, ipc_data->empty);
-			return 0;
-		}
-
-		/* read data */
-		if (dq + size_to_read > IPC_DATA_SIZE) {
-			size_to_copy_top = IPC_DATA_SIZE - dq;
-			size_to_copy_bottom = size_to_read - size_to_copy_top;
-
-			ipc_copy_bytes(buf, &ipc_data->buf[dq], size_to_copy_top);
-			ipc_copy_bytes(&buf[size_to_copy_top], &ipc_data->buf[0], size_to_copy_bottom);
-			dq = size_to_copy_bottom;
-		} else {
-			ipc_copy_bytes(buf, &ipc_data->buf[dq], size_to_read);
-
-			dq += size_to_read;
-			if (dq == IPC_DATA_SIZE)
-				dq = 0;
-		}
-
-		/* update queue index */
-		ipc_data->dq = dq;
-		if (ipc_data->eq == ipc_data->dq)
-			ipc_data->empty = 1;
-
-		if (ipc_data->full)
-			ipc_data->full = 0;
-
-#ifdef USE_IPC_BUF_LOG
-		CSP_PRINTF_INFO("%s: r_out (read_to_size:%d): eq:%d, dq:%d, f:%d, e:%d\n",
-			NAME_PREFIX, size_to_read, ipc_data->eq, ipc_data->dq, ipc_data->full, ipc_data->empty);
-#endif
-		return size_to_read;
-	}
-}
-
-int ipc_write_data(enum ipc_data_list dir, void *tx, u16 length)
-{
-	int ret = 0;
-	enum ipc_evt_list evtq;
-
-	if (length <= PACKET_SIZE_MAX)
-		ret = ipc_io_data(dir, tx, length);
-	else {
-		CSP_PRINTF_INFO("%s: invalid size:%d\n",
-			__func__, length);
-		return -1;
-	}
-
-	if (!ret) {
-		evtq = (dir == IPC_DATA_C2A) ? IPC_EVT_C2A : IPC_EVT_A2C;
-		ret = ipc_add_evt(evtq, IRQ_EVT_CH0);
-	} else {
-		CSP_PRINTF_INFO("%s: %s: error\n", NAME_PREFIX, __func__);
-	}
-	return ret;
-}
-
-int ipc_read_data(enum ipc_data_list dir, u8 *rx)
-{
-	int ret = ipc_io_data(dir, rx, 0);
-
-	if (!ret || (ret < 0)) {
-		CSP_PRINTF_INFO("%s: %s: error\n", NAME_PREFIX, __func__);
-		return -1;
-	}
-	return ret;
-}
-#endif
 
 static void ipc_print_databuf(void)
 {
@@ -604,8 +396,7 @@ int ipc_check_reset_valid()
 	int ret = 0;
 	struct ipc_map_area *map = ipc_get_base(IPC_REG_IPC);
 
-#ifdef USE_IPC_BUF
-	for (i = 0; i < IPC_DATA_MAX; i++)
+ 	for (i = 0; i < IPC_DATA_MAX; i++)
 		if (map->data[i].dq || map->data[i].eq ||
 			map->data[i].full || (map->data[i].empty != 1)) {
 			CSP_PRINTF_INFO("%s: %s: ipc_data_%s invalid: eq:%d, dq:%d, full:%d, empty:%d\n",
@@ -616,8 +407,8 @@ int ipc_check_reset_valid()
 			map->data[i].empty);
 			ret = -EINVAL;
 		}
-#endif
-	for (i = 0; i < IPC_EVT_MAX; i++)
+
+ 	for (i = 0; i < IPC_EVT_MAX; i++)
 		if (map->evt[i].ctrl.eq || map->evt[i].ctrl.dq ||
 			map->evt[i].ctrl.full || (map->evt[i].ctrl.empty != 1)) {
 			CSP_PRINTF_INFO("%s: %s: ipc_evt_%s invalid: eq:%d, dq:%d, full:%d, empty:%d\n",
@@ -670,24 +461,41 @@ enum {
 
 #define EVT_Q_INT(i) (((i) == IPC_EVT_NUM) ? 0 : (i))
 #define IRQ_EVT_IDX_INT(i) (((i) == IRQ_EVT_END) ? IRQ_EVT_START : (i))
-#define IRQ_C2A_WT_IDX_INT(i) (((i) == IRQ_C2A_END) ? IRQ_C2A_START : (i))
 
-#define EVT_Q_DEC(i) (((i) == -1) ? IPC_EVT_NUM - 1 : (i - 1))
+static inline bool __ipc_evt_queue_empty(struct ipc_evt_ctrl *ipc_evt)
+{
+	return (ipc_evt->eq == ipc_evt->dq);
+}
+
+static inline bool __ipc_evt_queue_full(struct ipc_evt_ctrl *ipc_evt)
+{
+	return (((ipc_evt->eq + 1) % IPC_EVT_NUM) == ipc_evt->dq);
+}
+
+static inline bool __ipc_evt_queue_index_check(struct ipc_evt_ctrl *ipc_evt)
+{
+	return ((ipc_evt->eq >= IPC_EVT_NUM) || (ipc_evt->dq >= IPC_EVT_NUM));
+}
 
 struct ipc_evt_buf *ipc_get_evt(enum ipc_evt_list evtq)
 {
 	struct ipc_evt *ipc_evt = &ipc_map->evt[evtq];
 	struct ipc_evt_buf *cur_evt = NULL;
 
+	if (__ipc_evt_queue_index_check(&ipc_evt->ctrl)) {
+		CSP_PRINTF_ERROR("%s:%s: failed by ipc index corrupt\n", NAME_PREFIX, __func__);
+		return NULL;
+	}
+
 	DISABLE_IRQ();
-	if (ipc_evt->ctrl.dq != __raw_readl(&ipc_evt->ctrl.eq)) {
+	if (!__ipc_evt_queue_empty(&ipc_evt->ctrl)) {
 		cur_evt = &ipc_evt->data[ipc_evt->ctrl.dq];
 		cur_evt->status = IPC_EVT_DQ;
-		ipc_evt->ctrl.dq = EVT_Q_INT(ipc_evt->ctrl.dq + 1);
+		ipc_evt->ctrl.dq = (ipc_evt->ctrl.dq + 1) % IPC_EVT_NUM;
 	} else if (__raw_readl(&ipc_evt->ctrl.full)) {
 		cur_evt = &ipc_evt->data[ipc_evt->ctrl.dq];
 		cur_evt->status = IPC_EVT_DQ;
-		ipc_evt->ctrl.dq = EVT_Q_INT(ipc_evt->ctrl.dq + 1);
+		ipc_evt->ctrl.dq = (ipc_evt->ctrl.dq + 1) % IPC_EVT_NUM;
 		__raw_writel(0, &ipc_evt->ctrl.full);
 	}
 	ENABLE_IRQ();
@@ -712,6 +520,11 @@ int ipc_add_evt(enum ipc_evt_list evtq, enum irq_evt_chub evt)
 	}
 
 retry:
+	if (__ipc_evt_queue_index_check(&ipc_evt->ctrl)) {
+		CSP_PRINTF_ERROR("%s:%s: failed by ipc index corrupt\n", NAME_PREFIX, __func__);
+		return -EINVAL;
+	}
+	
 	DISABLE_IRQ();
 	if (!__raw_readl(&ipc_evt->ctrl.full)) {
 		cur_evt = &ipc_evt->data[ipc_evt->ctrl.eq];
@@ -745,7 +558,7 @@ retry:
 		cur_evt->status = IPC_EVT_EQ;
 		cur_evt->irq = ipc_evt->ctrl.irq;
 		ipc_evt->ctrl.eq = EVT_Q_INT(ipc_evt->ctrl.eq + 1);
-		ipc_evt->ctrl.irq = IRQ_EVT_IDX_INT(ipc_evt->ctrl.irq + 1);
+		ipc_evt->ctrl.eq = (ipc_evt->ctrl.eq + 1) % IPC_EVT_NUM;
 		if (ipc_evt->ctrl.eq == __raw_readl(&ipc_evt->ctrl.dq))
 			__raw_writel(1, &ipc_evt->ctrl.full);
 	} else {
@@ -929,6 +742,33 @@ void ipc_hw_gen_interrupt(enum ipc_owner owner, int irq)
 void ipc_hw_set_mcuctrl(enum ipc_owner owner, unsigned int val)
 {
 	__raw_writel(val, (char *)ipc_own[owner].base + REG_MAILBOX_MCUCTL);
+}
+
+void ipc_hw_mask_all(enum ipc_owner owner)
+{
+    ipc_hw_clear_all_int_pend_reg(owner);
+    __raw_writel(0xffff0000, (char *)ipc_own[owner].base + REG_MAILBOX_INTMR0);
+    __raw_writel(0xffff, (char *)ipc_own[owner].base + REG_MAILBOX_INTMR1);
+}
+
+void ipc_dump_mailbox_sfr(struct mailbox_sfr *mailbox)
+{
+	mailbox->MCUCTL  = __raw_readl(ipc_own[AP].base + REG_MAILBOX_MCUCTL);
+	mailbox->INTGR0	 = __raw_readl(ipc_own[AP].base + REG_MAILBOX_INTGR0);
+	mailbox->INTCR0	 = __raw_readl(ipc_own[AP].base + REG_MAILBOX_INTCR0);
+	mailbox->INTMR0	 = __raw_readl(ipc_own[AP].base + REG_MAILBOX_INTMR0);
+	mailbox->INTSR0	 = __raw_readl(ipc_own[AP].base + REG_MAILBOX_INTSR0);
+	mailbox->INTMSR0 = __raw_readl(ipc_own[AP].base + REG_MAILBOX_INTMSR0);
+	mailbox->INTGR1	 = __raw_readl(ipc_own[AP].base + REG_MAILBOX_INTGR1);
+	mailbox->INTCR1	 = __raw_readl(ipc_own[AP].base + REG_MAILBOX_INTCR1);
+	mailbox->INTMR1  = __raw_readl(ipc_own[AP].base + REG_MAILBOX_INTMR1);
+	mailbox->INTSR1	 = __raw_readl(ipc_own[AP].base + REG_MAILBOX_INTSR1);
+	mailbox->INTMSR1 = __raw_readl(ipc_own[AP].base + REG_MAILBOX_INTMSR1);
+        pr_info("%s: 0x%x/0x%x 0x%x 0x%x 0x%x 0x%x/0x%x 0x%x 0x%x 0x%x 0x%x\n",
+		        __func__, mailbox->MCUCTL, mailbox->INTGR0, mailbox->INTCR0,
+			mailbox->INTMR0, mailbox->INTSR0, mailbox->INTMSR0,
+			mailbox->INTGR1, mailbox->INTCR1, mailbox->INTMR1,
+			mailbox->INTSR1, mailbox->INTMSR1);
 }
 
 void ipc_hw_mask_irq(enum ipc_owner owner, int irq)

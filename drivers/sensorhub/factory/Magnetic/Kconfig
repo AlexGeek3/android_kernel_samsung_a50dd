@@ -34,3 +34,14 @@ config SENSORS_SSP_MAGNETIC_LSM303AH
 	  factory test.
 	  To compile this driver as a module, choose M here: the
 	  module will be called ssp.
+
+config SENSORS_SSP_MAGNETIC_MMC5603
+	tristate "Sensors ssp magnetic sensor mmc5603"
+	default n
+	depends on SPI
+	help
+	  magnetic sensor mmc5603 file for factory test in ssp driver.
+          If you say yes here you get magnetic sensor mmc5603 support for
+	  factory test.
+	  To compile this driver as a module, choose M here: the
+	  module will be called ssp.

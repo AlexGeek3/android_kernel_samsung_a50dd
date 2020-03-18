@@ -122,6 +122,7 @@ struct platform_mif {
 	enum wlbt_boot_state {
 		WLBT_BOOT_IN_RESET = 0,
 		WLBT_BOOT_WAIT_CFG_REQ,
+		WLBT_BOOT_ACK_CFG_REQ,
 		WLBT_BOOT_CFG_DONE,
 		WLBT_BOOT_CFG_ERROR
 	} boot_state;
@@ -585,6 +586,14 @@ irqreturn_t platform_wdog_isr(int irq, void *data)
 	if (platform->reset_request_handler != platform_mif_irq_reset_request_default_handler) {
 		disable_irq_nosync(platform->wlbt_irq[PLATFORM_MIF_WDOG].irq_num);
 		platform->reset_request_handler(irq, platform->irq_reset_request_dev);
+		if (platform->boot_state == WLBT_BOOT_WAIT_CFG_REQ) {
+			/* Spurious interrupt from the SOC during CFG_REQ phase, just consume it */
+			SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "Spurious wdog irq during cfg_req phase\n");
+			return IRQ_HANDLED;
+		} else {
+			disable_irq_nosync(platform->wlbt_irq[PLATFORM_MIF_WDOG].irq_num);
+			platform->reset_request_handler(irq, platform->irq_reset_request_dev);
+		}
 	} else {
 		SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "WDOG Interrupt reset_request_handler not registered\n");
 		SCSC_TAG_INFO_DEV(PLAT_MIF, platform->dev, "Disabling unhandled WDOG IRQ.\n");
@@ -685,7 +694,7 @@ irqreturn_t platform_cfg_req_isr(int irq, void *data)
 	s32 ret = 0;
 	unsigned int ka_addr = 0x1000;
 	uint32_t *ka_patch_addr = ka_patch;
-	u32 id;
+	unsigned int id;
 
 #define CHECK(x) do { \
 	int retval = (x); \
@@ -799,12 +808,15 @@ irqreturn_t platform_cfg_req_isr(int irq, void *data)
 
 	while (ka_patch_addr < (ka_patch + ARRAY_SIZE(ka_patch))) {
 		CHECK(regmap_write(platform->boot_cfg, ka_addr, *ka_patch_addr));
-		ka_addr += sizeof(ka_patch[0]);
+		ka_addr += (unsigned int)sizeof(ka_patch[0]);
 		ka_patch_addr++;
 	}
 
 	/* Notify PMU of configuration done */
 	CHECK(regmap_write(platform->boot_cfg, 0x0, 0x0));
+
+	/* WLBT FW could panic as soon as CFG_ACK is written. So change state */
+	platform->boot_state = WLBT_BOOT_ACK_CFG_REQ;
 
 	/* BOOT_CFG_ACK */
 	CHECK(regmap_write(platform->boot_cfg, 0x4, 0x1));
@@ -830,9 +842,6 @@ irqreturn_t platform_cfg_req_isr(int irq, void *data)
 
 	/* Signal triggering function that the IRQ arrived and CFG was done */
 	complete(&platform->cfg_ack);
-
-	/* Re-enable IRQ here to allow spurious interrupt to be tracked */
-	enable_irq(platform->wlbt_irq[PLATFORM_MIF_CFG_REQ].irq_num);
 
 	return IRQ_HANDLED;
 cfg_error:
@@ -1196,7 +1205,7 @@ static int platform_mif_reset(struct scsc_mif_abs *interface, bool reset)
 
 static void __iomem *platform_mif_map_region(unsigned long phys_addr, size_t size)
 {
-	int         i;
+	size_t      i;
 	struct page **pages;
 	void        *vmem;
 

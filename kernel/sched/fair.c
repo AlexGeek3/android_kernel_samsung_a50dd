@@ -3120,7 +3120,7 @@ __update_load_avg_se(u64 now, int cpu, struct cfs_rq *cfs_rq, struct sched_entit
 	if (___update_load_avg(now, cpu, &se->avg,
 			       se->on_rq * scale_load_down(se->load.weight),
 			       cfs_rq->curr == se, NULL, NULL)) {
-		if (schedtune_util_est_en(task_of(se)))
+		if (entity_is_task(se) && schedtune_util_est_en(task_of(se)))
 			cfs_se_util_change(&se->avg);
 
 #ifdef UTIL_EST_DEBUG

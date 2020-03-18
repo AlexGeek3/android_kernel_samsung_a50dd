@@ -59,8 +59,7 @@
 // Version flag
 #define FLAG_MAIN			(1)
 #define FLAG_FW				(2)
-#define FLAG_CORE			(3)
-#define FLAG_TEST			(4)
+#define FLAG_TEST			(3)
 
 int ist40xx_set_padctrl2(struct ist40xx_data *data);
 int ist40xx_set_i2c_32bit(struct ist40xx_data *data);

@@ -131,7 +131,7 @@ static int __set_req_work(struct fimc_is_work_list *this,
 static inline int get_free_work(struct fimc_is_work_list *this,
 	struct fimc_is_work **work)
 {
-	if (in_interrupt())
+	if (in_irq())
 		return __get_free_work_irq(this, work);
 	else
 		return __get_free_work(this, work);
@@ -140,7 +140,7 @@ static inline int get_free_work(struct fimc_is_work_list *this,
 static inline int set_req_work(struct fimc_is_work_list *this,
 	struct fimc_is_work *work)
 {
-	if (in_interrupt())
+	if (in_irq())
 		return __set_req_work_irq(this, work);
 	else
 		return __set_req_work(this, work);
@@ -372,6 +372,7 @@ void fimc_is_hardware_flush_frame(struct fimc_is_hw_ip *hw_ip,
 		if (done_type == IS_SHOT_TIMEOUT) {
 			mserr_hw("[F:%d]hardware is timeout", frame->instance, hw_ip, frame->fcount);
 			fimc_is_hardware_size_dump(hw_ip);
+			fimc_is_lib_logdump();
 		}
 
 		ret = fimc_is_hardware_frame_ndone(hw_ip, frame, atomic_read(&hw_ip->instance), done_type);
@@ -1008,7 +1009,8 @@ int fimc_is_hardware_shot(struct fimc_is_hardware *hardware, u32 instance,
 			if (!valid_hw_slot_id(hw_slot)) {
 				merr_hw("invalid slot (%d,%d)", instance,
 					hw_id, hw_slot);
-				return -EINVAL;
+				ret = -EINVAL;
+				goto shot_err_cancel;
 			}
 
 			hw_ip = &hardware->hw_ip[hw_slot];
@@ -1028,11 +1030,12 @@ int fimc_is_hardware_shot(struct fimc_is_hardware *hardware, u32 instance,
 			hw_ip->debug_index[0] = frame->fcount;
 			hw_ip->debug_info[index].cpuid[DEBUG_POINT_HW_SHOT] = raw_smp_processor_id();
 			hw_ip->debug_info[index].time[DEBUG_POINT_HW_SHOT] = local_clock();
+
 			ret = CALL_HW_OPS(hw_ip, shot, frame, hw_map);
 			if (ret) {
 				mserr_hw("shot fail (%d)[F:%d]", instance, hw_ip,
 					hw_slot, frame->fcount);
-				return -EINVAL;
+				goto shot_err_cancel;
 			}
 		}
 		child = child->parent;
@@ -1046,6 +1049,24 @@ int fimc_is_hardware_shot(struct fimc_is_hardware *hardware, u32 instance,
 			frame->fcount, GROUP_ID(group->id),
 			frame->bak_flag, frame->out_flag, frame->core_flag, framenum);
 #endif
+
+	return ret;
+
+shot_err_cancel:
+	mwarn_hw("[F:%d] Canceled by hardware shot err", instance, hw_ip, frame->fcount);
+
+	framemgr_e_barrier_common(framemgr, 0, flags);
+	trans_frame(framemgr, frame, FS_HW_FREE);
+	framemgr_x_barrier_common(framemgr, 0, flags);
+
+	if (child && child->tail) {
+		struct fimc_is_group *restore_grp = child->tail;
+
+		while (restore_grp && (restore_grp->id != child->id)) {
+			fimc_is_hardware_restore_by_group(hardware, restore_grp, instance);
+			restore_grp = restore_grp->parent;
+		}
+	}
 
 	return ret;
 }
@@ -1188,6 +1209,7 @@ int fimc_is_hardware_grp_shot(struct fimc_is_hardware *hardware, u32 instance,
 	struct fimc_is_framemgr *framemgr;
 	struct fimc_is_group *head;
 	ulong flags = 0;
+	u32 shot_timeout = 0;
 #if defined(MULTI_SHOT_KTHREAD) || defined(MULTI_SHOT_TASKLET)
 	int i;
 #endif
@@ -1229,11 +1251,11 @@ int fimc_is_hardware_grp_shot(struct fimc_is_hardware *hardware, u32 instance,
 	ret = check_shot_exist(framemgr, frame->fcount);
 
 	/* check late shot */
-	if ((hw_ip->internal_fcount >= frame->fcount || ret == INTERNAL_SHOT_EXIST)
+	if ((hw_ip->internal_fcount[instance] >= frame->fcount || ret == INTERNAL_SHOT_EXIST)
 		&& test_bit(FIMC_IS_GROUP_OTF_INPUT, &head->state)) {
 		msinfo_hw("LATE_SHOT (%d)[F:%d][G:0x%x][B:0x%lx][O:0x%lx][C:0x%lx]\n",
 			instance, hw_ip,
-			hw_ip->internal_fcount, frame->fcount, GROUP_ID(head->id),
+			hw_ip->internal_fcount[instance], frame->fcount, GROUP_ID(head->id),
 			frame->bak_flag, frame->out_flag, frame->core_flag);
 		frame->type = SHOT_TYPE_LATE;
 		/* unlock previous framemgr */
@@ -1278,6 +1300,9 @@ int fimc_is_hardware_grp_shot(struct fimc_is_hardware *hardware, u32 instance,
 	/* for NI (noise index) */
 	hw_frame->noise_idx = frame->noise_idx;
 
+	/* shot timer set */
+	shot_timeout = head->device->resourcemgr->shot_timeout;
+
 	if (test_bit(FIMC_IS_GROUP_OTF_INPUT, &head->state)) {
 		if (!atomic_read(&hw_ip->status.otf_start)) {
 			atomic_set(&hw_ip->status.otf_start, 1);
@@ -1296,7 +1321,7 @@ int fimc_is_hardware_grp_shot(struct fimc_is_hardware *hardware, u32 instance,
 			put_frame(framemgr, hw_frame, FS_HW_REQUEST);
 			framemgr_x_barrier_irqr(framemgr, 0, flags);
 
-			mod_timer(&hw_ip->shot_timer, jiffies + msecs_to_jiffies(FIMC_IS_SHOT_TIMEOUT));
+			mod_timer(&hw_ip->shot_timer, jiffies + msecs_to_jiffies(shot_timeout));
 
 			return ret;
 		}
@@ -1337,7 +1362,7 @@ int fimc_is_hardware_grp_shot(struct fimc_is_hardware *hardware, u32 instance,
 			return -EINVAL;
 		}
 #endif
-		mod_timer(&hw_ip->shot_timer, jiffies + msecs_to_jiffies(FIMC_IS_SHOT_TIMEOUT));
+		mod_timer(&hw_ip->shot_timer, jiffies + msecs_to_jiffies(shot_timeout));
 	}
 
 	framemgr_x_barrier_irqr(framemgr, 0, flags);
@@ -1359,6 +1384,7 @@ int make_internal_shot(struct fimc_is_hw_ip *hw_ip, u32 instance, u32 fcount,
 	int ret = 0;
 	int i = 0;
 	struct fimc_is_frame *frame;
+	u32 shot_timeout;
 
 	FIMC_BUG(!hw_ip);
 	FIMC_BUG(!framemgr);
@@ -1403,7 +1429,8 @@ int make_internal_shot(struct fimc_is_hw_ip *hw_ip, u32 instance, u32 fcount,
 	frame->instance = instance;
 	*in_frame = frame;
 
-	mod_timer(&hw_ip->shot_timer, jiffies + msecs_to_jiffies(FIMC_IS_SHOT_TIMEOUT));
+	shot_timeout = hw_ip->group[instance]->device->resourcemgr->shot_timeout;
+	mod_timer(&hw_ip->shot_timer, jiffies + msecs_to_jiffies(shot_timeout));
 
 	return ret;
 }
@@ -1418,6 +1445,7 @@ int fimc_is_hardware_config_lock(struct fimc_is_hw_ip *hw_ip, u32 instance, u32 
 	u32 sensor_fcount;
 	u32 fcount = framenum + 1;
 	u32 log_count;
+	bool req_int_shot = false;
 
 	FIMC_BUG(!hw_ip);
 
@@ -1442,10 +1470,17 @@ int fimc_is_hardware_config_lock(struct fimc_is_hw_ip *hw_ip, u32 instance, u32 
 retry_get_frame:
 	framemgr_e_barrier(framemgr, 0);
 
-	frame = get_frame(framemgr, FS_HW_REQUEST);
+	/*
+	 * Check fcount of the requested frame before handling it.
+	 * The fcount of next shot,
+	 * which is going to be delivered to HW within N config_lock,
+	 * must be N+1 to guarantee the fcount synchronization with sensor device.
+	 */
+	frame = peek_frame(framemgr, FS_HW_REQUEST);
 	if (!IS_ERR_OR_NULL(frame)) {
-		if (unlikely(frame->fcount <= framenum)) {
-			put_frame(framemgr, frame, FS_HW_WAIT_DONE);
+		if (unlikely(frame->fcount < fcount)) {
+			/* Fcount of the requested frame is too old. Flush it. */
+			trans_frame(framemgr, frame, FS_HW_WAIT_DONE);
 
 			framemgr_x_barrier(framemgr, 0);
 
@@ -1456,8 +1491,18 @@ retry_get_frame:
 			}
 
 			goto retry_get_frame;
+		} else if (unlikely(frame->fcount > fcount)) {
+			/* Fcount of the requested frame is too fast. Skip it. */
+			req_int_shot = true;
+		} else {
+			/* It is the expected fcount. Use it. */
+			frame = get_frame(framemgr, FS_HW_REQUEST);
 		}
 	} else {
+		req_int_shot = true;
+	}
+
+	if (req_int_shot) {
 		ret = make_internal_shot(hw_ip, instance, fcount, &frame, framemgr);
 		if (ret == INTERNAL_SHOT_EXIST) {
 			framemgr_x_barrier(framemgr, 0);
@@ -1499,16 +1544,20 @@ retry_get_frame:
 	return ret;
 }
 
-void check_late_shot(struct fimc_is_hw_ip *hw_ip)
+void check_late_shot(struct fimc_is_hw_ip *hw_ip, u32 fcount)
 {
 	struct fimc_is_frame *frame;
 	struct fimc_is_framemgr *framemgr = hw_ip->framemgr_late;
 
 	framemgr_e_barrier(framemgr, 0);
 
-	frame = get_frame(framemgr, FS_HW_REQUEST);
-	if (frame) {
-		put_frame(framemgr, frame, FS_HW_WAIT_DONE);
+	/*
+	 * Handle LATE_FRAME error only for the frame that is being processed
+	 * or has been processed.
+	 */
+	frame = peek_frame(framemgr, FS_HW_REQUEST);
+	if (frame && frame->fcount <= fcount) {
+		trans_frame(framemgr, frame, FS_HW_WAIT_DONE);
 
 		framemgr_x_barrier(framemgr, 0);
 
@@ -1601,7 +1650,7 @@ void fimc_is_hardware_frame_start(struct fimc_is_hw_ip *hw_ip, u32 instance)
 			print_all_hw_frame_count(hw_ip->hardware);
 			framemgr_x_barrier(framemgr, 0);
 			mserr_hw("FSTART frame null (%d) (%d != %d)", instance, hw_ip,
-				hw_ip->internal_fcount, hw_ip->group[instance]->id, head->id);
+				hw_ip->internal_fcount[instance], hw_ip->group[instance]->id, head->id);
 			return;
 		}
 
@@ -1625,13 +1674,13 @@ void fimc_is_hardware_frame_start(struct fimc_is_hw_ip *hw_ip, u32 instance)
 
 		put_frame(framemgr, frame, FS_HW_WAIT_DONE);
 		framemgr_x_barrier(framemgr, 0);
+
+		if (test_bit(FIMC_IS_GROUP_OTF_INPUT, &head->state))
+			check_late_shot(hw_ip, frame->fcount);
 	}
 
 	clear_bit(HW_CONFIG, &hw_ip->state);
 	atomic_set(&hw_ip->status.Vvalid, V_VALID);
-
-	if (test_bit(FIMC_IS_GROUP_OTF_INPUT, &hw_ip->group[instance]->state))
-		check_late_shot(hw_ip);
 }
 
 int fimc_is_hardware_sensor_start(struct fimc_is_hardware *hardware, u32 instance,
@@ -1641,6 +1690,7 @@ int fimc_is_hardware_sensor_start(struct fimc_is_hardware *hardware, u32 instanc
 	int hw_slot = -1;
 	struct fimc_is_hw_ip *hw_ip;
 	enum fimc_is_hardware_id hw_id = DEV_HW_END;
+	u32 shot_timeout = 0;
 
 	FIMC_BUG(!hardware);
 
@@ -1667,8 +1717,10 @@ int fimc_is_hardware_sensor_start(struct fimc_is_hardware *hardware, u32 instanc
 		return -EINVAL;
 	}
 
-	if (atomic_read(&hw_ip->status.otf_start))
-		mod_timer(&hw_ip->shot_timer, jiffies + msecs_to_jiffies(FIMC_IS_SHOT_TIMEOUT));
+	if (atomic_read(&hw_ip->status.otf_start)) {
+		shot_timeout = hw_ip->group[instance]->device->resourcemgr->shot_timeout;
+		mod_timer(&hw_ip->shot_timer, jiffies + msecs_to_jiffies(shot_timeout));
+	}
 
 	atomic_set(&hardware->streaming[hardware->sensor_position[instance]], 1);
 	atomic_set(&hardware->bug_count, 0);
@@ -1814,7 +1866,8 @@ int fimc_is_hardware_process_start(struct fimc_is_hardware *hardware, u32 instan
 			mserr_hw("enable fail (%d)", instance, hw_ip, hw_slot);
 			return -EINVAL;
 		}
-		hw_ip->internal_fcount = 0;
+
+		hw_ip->internal_fcount[instance] = 0;
 	}
 
 	return ret;
@@ -2027,7 +2080,7 @@ void fimc_is_hardware_process_stop(struct fimc_is_hardware *hardware, u32 instan
 	CALL_HW_OPS(hw_ip, clk_gate, instance, true, false);
 	fimc_is_hardware_force_stop(hardware, hw_ip, instance);
 	CALL_HW_OPS(hw_ip, clk_gate, instance, false, false);
-	hw_ip->internal_fcount = 0;
+	hw_ip->internal_fcount[instance] = 0;
 	atomic_set(&hw_ip->status.otf_start, 0);
 
 	return;
@@ -2193,7 +2246,6 @@ int fimc_is_hardware_close(struct fimc_is_hardware *hardware,u32 hw_id, u32 inst
 		atomic_set(&hw_ip->status.otf_start, 0);
 		atomic_set(&hw_ip->fcount, 0);
 		atomic_set(&hw_ip->instance, 0);
-		hw_ip->internal_fcount = 0;
 		atomic_set(&hw_ip->run_rsccount, 0);
 
 #if defined(MULTI_SHOT_KTHREAD)

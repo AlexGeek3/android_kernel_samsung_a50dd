@@ -1512,6 +1512,7 @@ static void s3c24xx_serial_resetport(struct uart_port *port,
 	/* To prevent unexpected Interrupt before enabling the channel */
 	wr_regl(port, S3C64XX_UINTM, 0xf);
 
+	/* reset both fifos */
 	wr_regl(port, S3C2410_UFCON, cfg->ufcon);
 
 	/* some delay is required after fifo reset */
@@ -1682,6 +1683,42 @@ static inline struct s3c24xx_serial_drv_data *s3c24xx_get_driver_data(
 	return (struct s3c24xx_serial_drv_data *)
 			platform_get_device_id(pdev)->driver_data;
 }
+
+void s3c24xx_serial_rx_fifo_wait(void)
+{
+	struct s3c24xx_uart_port *ourport;
+	struct uart_port *port;
+	unsigned int fifo_stat;
+	unsigned long wait_time;
+	unsigned int fifo_count;
+
+	fifo_count = 0;
+
+	list_for_each_entry(ourport, &drvdata_list, node) {
+		if (ourport->port.line != CONFIG_S3C_LOWLEVEL_UART_PORT)
+			continue;
+
+		port = &ourport->port;
+		fifo_stat = rd_regl(port, S3C2410_UFSTAT);
+		fifo_count = s3c24xx_serial_rx_fifocnt(ourport, fifo_stat);
+		if (fifo_count) {
+			uart_clock_enable(ourport);
+			__clear_bit(S3C64XX_UINTM_RXD, portaddrl(port, S3C64XX_UINTM));
+			uart_clock_disable(ourport);
+			rx_enabled(port) = 1;
+		}
+		wait_time = jiffies + HZ;
+		do {
+			port = &ourport->port;
+			fifo_stat = rd_regl(port, S3C2410_UFSTAT);
+			cpu_relax();
+		} while (s3c24xx_serial_rx_fifocnt(ourport, fifo_stat) && time_before(jiffies, wait_time));
+
+		if (rx_enabled(port))
+			s3c24xx_serial_stop_rx(port);
+	}
+}
+EXPORT_SYMBOL_GPL(s3c24xx_serial_rx_fifo_wait);
 
 void s3c24xx_serial_fifo_wait(void)
 {
@@ -2127,6 +2164,9 @@ static int s3c24xx_serial_suspend(struct device *dev)
 		*/
 		if (ourport->rts_control)
 			change_uart_gpio(RTS_PINCTRL, ourport);
+
+		udelay(300);//dealy for sfr update
+		s3c24xx_serial_rx_fifo_wait();
 
 		uart_suspend_port(&s3c24xx_uart_drv, port);
 #ifdef CONFIG_SERIAL_SAMSUNG_HWACG

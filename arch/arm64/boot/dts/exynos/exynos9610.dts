@@ -28,7 +28,6 @@
 #include "exynos9610-mfc.dtsi"
 #include <dt-bindings/soc/samsung/exynos-bcm_dbg.h>
 #include "exynos9610-camera.dtsi"
-#include "exynos9610-inputbooster.dtsi"
 
 / {
 	compatible = "samsung,armv8", "samsung,exynos9610";
@@ -1821,7 +1820,7 @@
 			compatible = "samsung,abox-rdma";
 			reg = <0x0 0x14A51600 0x100>;
 			id = <6>;
-			type = "realtime";
+			type = "normal";
 			scsc_bt;
 			buffer_type = "dma";
 		};

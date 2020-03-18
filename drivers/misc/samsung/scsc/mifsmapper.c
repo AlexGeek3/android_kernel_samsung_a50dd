@@ -337,10 +337,12 @@ int mifsmapper_deinit(struct mifsmapper *smapper)
 
 	SCSC_TAG_INFO(MIF, "Deinit SMAPPER\n");
 
-	total_num_banks = smapper->num_large_banks + smapper->num_small_banks;
-	if (!smapper->in_use)
+	if (!smapper->in_use) {
+		spin_unlock(&smapper->lock);
 		return -ENODEV;
+	}
 
+	total_num_banks = smapper->num_large_banks + smapper->num_small_banks;
 	for (; i < total_num_banks; i++) {
 		kfree(smapper->bank[i].entries_bm);
 		smapper->bank[i].num_entries = 0;

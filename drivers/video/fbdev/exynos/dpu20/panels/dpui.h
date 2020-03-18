@@ -80,6 +80,7 @@ enum dpui_key {
 	DPUI_KEY_PNPOCI,	/* panel POC image index */
 	DPUI_KEY_PNPOCI_ORG,	/* panel POC image index in factory */
 #endif
+	DPUI_KEY_UB_CON,		/* panel ub_con pin interrupt count */
 
 	/* dependent on processor */
 	DPUI_KEY_EXY_SWRCV,	/* exynos sw recovery count */
